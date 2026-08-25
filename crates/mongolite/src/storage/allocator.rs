@@ -87,6 +87,14 @@ impl<'a> Allocator<'a> {
     pub fn free_list_head(&self) -> u32 {
         self.free_list_head
     }
+
+    pub fn file(&self) -> &File {
+        self.file
+    }
+
+    pub fn file_mut(&mut self) -> &mut File {
+        self.file
+    }
 }
 
 #[cfg(test)]
