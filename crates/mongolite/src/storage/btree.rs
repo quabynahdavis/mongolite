@@ -19,7 +19,7 @@ impl Default for BTreeConfig {
     }
 }
 
-fn max_order(page_size: u32) -> usize {
+pub(crate) fn max_order(page_size: u32) -> usize {
     let usable = page_size as usize - PageHeader::SIZE - 9;
     let entry_cost = 128;
     (usable / entry_cost).max(4)

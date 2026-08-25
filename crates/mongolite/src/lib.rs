@@ -1,3 +1,5 @@
+pub mod collection;
+pub mod cursor;
 pub mod db;
 pub mod document;
 pub mod error;
