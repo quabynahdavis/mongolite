@@ -4,6 +4,7 @@ use crate::db::{deserialize_id, serialize_id, Database};
 use crate::document::oid::ObjectId;
 use crate::document::Document as MongoDocument;
 use crate::error::Result;
+use crate::query::QueryMatcher;
 use crate::storage::btree::{BTree, BTreeConfig};
 
 pub struct Collection<'a> {
@@ -69,19 +70,23 @@ impl<'a> Collection<'a> {
         Ok(InsertManyResult { inserted_ids: ids })
     }
 
-    pub fn find(&self, _filter: Option<Document>) -> Result<Vec<Document>> {
+    pub fn find(&self, filter: Option<Document>) -> Result<Vec<Document>> {
         let index = self.get_index()?;
         let entries = Box::leak(Box::new(index)).iter()?;
         let mut docs = Vec::new();
+        let filter = filter.unwrap_or_default();
         for (_, value) in entries {
             let doc = MongoDocument::from_bytes(&value)?;
-            docs.push(doc.into_bson().clone());
+            let bson_doc = doc.into_bson();
+            if QueryMatcher::matches(&bson_doc, &filter)? {
+                docs.push(bson_doc.clone());
+            }
         }
         Ok(docs)
     }
 
-    pub fn find_one(&self, _filter: Option<Document>) -> Result<Option<Document>> {
-        let docs = self.find(None)?;
+    pub fn find_one(&self, filter: Option<Document>) -> Result<Option<Document>> {
+        let docs = self.find(filter)?;
         Ok(docs.into_iter().next())
     }
 
@@ -125,9 +130,9 @@ impl<'a> Collection<'a> {
         self.delete_one(filter)
     }
 
-    pub fn count(&self, _filter: Option<Document>) -> Result<u64> {
-        let index = self.get_index()?;
-        Ok(index.len()? as u64)
+    pub fn count(&self, filter: Option<Document>) -> Result<u64> {
+        let docs = self.find(filter)?;
+        Ok(docs.len() as u64)
     }
 
     pub fn drop(&mut self) -> Result<bool> {
