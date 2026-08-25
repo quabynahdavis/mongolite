@@ -1,0 +1,14 @@
+[package]
+name = "mongolite-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "C FFI bindings for MongoLite"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+mongolite = { path = "../mongolite" }

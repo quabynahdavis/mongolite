@@ -1,0 +1,18 @@
+[package]
+name = "mongolite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+
+[dependencies]
+bson = "2.9"
+serde = { version = "1.0", features = ["derive"] }
+crc32fast = "1.4"
+memmap2 = "0.9"
+thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.10"

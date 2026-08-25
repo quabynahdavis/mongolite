@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mongolite",
+    "crates/mongolite-cli",
+    "crates/mongolite-ffi",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+authors = ["MongoLite Contributors"]
+repository = "https://github.com/mongolite/mongolite"
+description = "A serverless, single-file, MongoDB-compatible document database"

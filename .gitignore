@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+*.mongolite
+*.mongolite-wal
+Cargo.lock
+.DS_Store
