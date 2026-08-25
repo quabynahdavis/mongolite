@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod collection;
 pub mod cursor;
 pub mod db;
