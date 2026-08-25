@@ -85,6 +85,42 @@ impl<'a> Collection<'a> {
         Ok(docs)
     }
 
+    pub fn find_with_options(
+        &self,
+        filter: Option<Document>,
+        sort: Option<Document>,
+        skip: Option<u64>,
+        limit: Option<u64>,
+        projection: Option<Document>,
+    ) -> Result<Vec<Document>> {
+        let mut docs = self.find(filter)?;
+
+        if let Some(sort_spec) = sort {
+            crate::cursor::Sorter::sort(&mut docs, &sort_spec);
+        }
+
+        let skip = skip.unwrap_or(0) as usize;
+        if skip > 0 {
+            docs = docs.into_iter().skip(skip).collect();
+        }
+
+        if let Some(lim) = limit {
+            let lim = lim as usize;
+            if lim < docs.len() {
+                docs.truncate(lim);
+            }
+        }
+
+        if let Some(proj) = projection {
+            docs = docs
+                .iter()
+                .map(|d| crate::cursor::Projection::apply(d, &proj).unwrap())
+                .collect();
+        }
+
+        Ok(docs)
+    }
+
     pub fn find_one(&self, filter: Option<Document>) -> Result<Option<Document>> {
         let docs = self.find(filter)?;
         Ok(docs.into_iter().next())
