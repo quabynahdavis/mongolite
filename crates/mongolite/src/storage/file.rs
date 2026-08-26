@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::fs::{File as StdFile, OpenOptions};
 use std::path::Path;
 
+#[cfg(feature = "mmap")]
 use memmap2::MmapMut;
 
 use crate::error::{Error, Result};
