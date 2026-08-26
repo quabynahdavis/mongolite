@@ -1,16 +1,13 @@
-# Documentation Changelog
+# Changelog
 
-All notable changes to the MongoLite documentation will be recorded in this file.
+All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added missing documentation files per project guidelines.
+- Updated `OVERVIEW.md` with an overview of MongoLite, its features, and structure.
 
-## [0.1.0] — 2026-08-25
-
-### Added
-- Initial documentation structure created.
-- Top-level `OVERVIEW.md` with project description and quick start guide.
-- Architecture documentation folder with file format, storage engine, and document model docs.
-- API documentation folder with Database, Collection, and Cursor reference docs.
-- Storage documentation folder with pages, B+tree, and WAL docs.
-- Query documentation folder with query operators, update operators, and projection docs.
-- `OVERVIEW.md` and `CHANGELOG.md` files in every documentation folder.
+## [0.1.0] - 2026-08-26
+- Initial release of MongoLite core library, CLI, and FFI wrapper.
+- Implemented basic CRUD operations, collection listing, and simple statistics.
+- Added storage engine with B‑Tree, WAL, and page allocation.
+- Provided integration tests for CLI commands.

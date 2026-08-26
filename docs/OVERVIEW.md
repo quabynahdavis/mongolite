@@ -1,51 +1,23 @@
-# MongoLite Documentation
+# MongoLite Overview
 
-Welcome to the MongoLite documentation. MongoLite is a serverless, single-file, MongoDB-compatible document database written in Rust.
+MongoLite is a lightweight, single‑file, server‑less document database that implements a subset of the MongoDB API. It is written in Rust and provides:
 
-## Status
+- A core library (`mongolite`) exposing `Database`, `Collection`, cursors, and query helpers.
+- An interactive CLI (`mongolite-cli`) for quick manual operations.
+- A C‑FFI wrapper (`mongolite-ffi`) enabling use from other languages.
 
-**Version:** 0.1.0 — Early development
+The database stores data in a custom B‑Tree backed storage engine with write‑ahead logging (WAL) for durability. It is intended for embedded scenarios, testing, and small‑scale applications where a full MongoDB server would be overkill.
 
-## Documentation Index
-
-| Directory | Description |
-|-----------|-------------|
-| [architecture](./architecture/) | Core architectural concepts: file format, storage engine, and document model |
-| [api](./api/) | Public API reference: Database, Collection, and Cursor interfaces |
-| [storage](./storage/) | Storage internals: pages, B+tree indexes, and write-ahead log |
-| [query](./query/) | Query language: operators, updates, and projections |
-
-## Quick Start
-
-```rust
-use mongolite::Database;
-
-// Open (or create) a single-file database
-let db = Database::open("mydb.mongolite")?;
-
-// Get a collection
-let users = db.collection("users");
-
-// Insert a document
-users.insert_one(doc! { "name": "Alice", "age": 30 })?;
-
-// Query documents
-let results = users.find(doc! { "age": { "$gte": 25 } })?;
-```
+## Features
+- BSON‑compatible document model.
+- Basic CRUD operations (`insert`, `find`, `count`, `delete`).
+- Collection listing and per‑collection statistics.
+- Simple query language based on JSON filters.
+- File‑based persistence with automatic recovery from crashes.
+- FFI bindings for C and other languages.
 
 ## Project Structure
-
-```
-mongolite/
-├── crates/
-│   ├── mongolite/        # Core library
-│   ├── mongolite-cli/    # CLI tool
-│   └── mongolite-ffi/    # C bindings
-├── tests/                # Integration tests
-├── benches/              # Benchmarks
-└── docs/                 # This documentation
-```
-
-## License
-
-Apache-2.0
+- `crates/mongolite/` – core library.
+- `crates/mongolite-cli/` – command‑line interface binary.
+- `crates/mongolite-ffi/` – C‑FFI wrapper.
+- `docs/` – documentation (this folder).
