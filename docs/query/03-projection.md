@@ -1,167 +1,98 @@
-# Projection
+# Projection and Sorting
 
-Projection controls which fields are included in query results. By default, all fields are returned. Projection allows you to include or exclude specific fields, reducing data transfer and improving performance.
+MongoLite’s query engine supports lightweight **projection** and **sorting**
+when fetching collections of documents. These features are accessed via
+`Collection::find_with_options(...)`.
 
-## Basic Projection
-
-### Include Specific Fields
-
-```rust
-// Return only "name" and "email" fields (plus "_id")
-let cursor = users.find(doc! { "status": "active" })
-    .projection(doc! { "name": 1, "email": 1 })?;
-```
-
-| Value | Meaning |
-|-------|---------|
-| `1` | Include this field |
-| `0` | Exclude this field |
-
-### Exclude Specific Fields
+## Public Interface
 
 ```rust
-// Return all fields except "password" and "internal_notes"
-let cursor = users.find(doc! {})
-    .projection(doc! { "password": 0, "internal_notes": 0 })?;
+pub fn find_with_options(
+    &self,
+    filter:     Option<Document>,
+    sort:       Option<Document>,
+    skip:       Option<u64>,
+    limit:      Option<u64>,
+    projection: Option<Document>,
+) -> Result<Vec<Document>>
 ```
 
-## Rules
+## Projection
 
-1. **You cannot mix inclusion and exclusion** in the same projection (except for `_id`).
-2. **`_id` is always included** unless explicitly excluded.
-3. **Inclusion projections** return only the specified fields (plus `_id`).
-4. **Exclusion projections** return all fields except the specified ones.
+A projection document restricts which fields appear in returned documents.
+
+Rules:
+- Mix of include (`{ "field": 1 }`) and exclude (`{ "field": 0 }`) raises
+  `Error::InvalidQuery`.
+- Omitting `_id` defaults to **including** it.
+- Setting `"_id": 0` explicitly excludes it.
+
+### Examples
+
+#### Include Specific Fields
 
 ```rust
-// VALID: inclusion projection
-.projection(doc! { "name": 1, "email": 1 })
+let projection = doc! { "name": 1, "age": 1 };
 
-// VALID: exclusion projection
-.projection(doc! { "password": 0 })
-
-// VALID: exclude _id in inclusion projection
-.projection(doc! { "name": 1, "_id": 0 })
-
-// INVALID: mixing inclusion and exclusion (except _id)
-.projection(doc! { "name": 1, "password": 0 })  // Error!
+let docs = coll.find_with_options(None, None, None, None, Some(projection))?;
+// Returns [{"_id": ..., "name": "Alice", "age": 30}]
 ```
 
-## Nested Field Projection
-
-### Include Nested Fields
+#### Exclude Fields
 
 ```rust
-// Return only "name" and "address.city"
-let cursor = users.find(doc! {})
-    .projection(doc! {
-        "name": 1,
-        "address.city": 1,
-    })?;
+let projection = doc! { "password_hash": 0 };
+
+let docs = coll.find_with_options(None, None, None, None, Some(projection))?;
+// Password field omitted, everything else included.
 ```
 
-### Exclude Nested Fields
+#### Exclude Both Field and _id
 
 ```rust
-// Return all fields except "address.zip"
-let cursor = users.find(doc! {})
-    .projection(doc! { "address.zip": 0 })?;
+let projection = doc! { "temp_field": 0, "_id": 0 };
+
+let docs = coll.find_with_options(None, None, None, None, Some(projection))?;
+// Drops both temp_field and _id.
 ```
 
-## Array Projection
+## Sorting
 
-### Slice Operator
+Sorting applies after filtering. Each key is sorted ascending `(1)` or
+descending `(-1)`:
 
 ```rust
-// Return only the first 3 elements of the "tags" array
-let cursor = users.find(doc! {})
-    .projection(doc! { "tags": { "$slice": 3 } })?;
-
-// Return the last 2 elements
-let cursor = users.find(doc! {})
-    .projection(doc! { "tags": { "$slice": -2 } })?;
-
-// Return elements 2-4 (skip 2, limit 3)
-let cursor = users.find(doc! {})
-    .projection(doc! { "tags": { "$slice": [2, 3] } })?;
+let sort = doc! { "age": -1, "name": 1 };
+let docs = coll.find_with_options(None, Some(sort), None, None, None)?;
 ```
 
-### Positional Operator (`$`)
+Comparison rules:
+- Integer/float are coerced for mixed-type comparisons.
+- Strings compared lexically.
+- Null is treated as smallest element.
+- Missing fields sort as nulls.
+
+## Skip and Limit
 
 ```rust
-// Return only the first matching array element
-let cursor = users.find(doc! { "tags": "rust" })
-    .projection(doc! { "tags.$": 1 })?;
+// Skip first 10 docs, return next 5
+let docs = coll.find_with_options(
+    None, None,
+    Some(10), Some(5),
+    None
+)?;
 ```
 
-## Projection Examples
+## Summary Table
 
-### Selective Field Return
+| Option       | Argument      | Effect                           |
+|--------------|---------------|----------------------------------|
+| `filter`     | `Option<Document>` | Restrict matching documents |
+| `sort`       | `Option<Document>` | Order results                |
+| `skip`       | `Option<u64>`   | Number of initial docs skipped |
+| `limit`      | `Option<u64>`   | Cap total docs returned        |
+| `projection` | `Option<Document>` | Choose visible fields         |
 
-```rust
-// Get only names and ages of active users
-let cursor = users
-    .find(doc! { "status": "active" })
-    .projection(doc! { "name": 1, "age": 1, "_id": 0 })?;
+---
 
-for doc in cursor {
-    let doc = doc?;
-    println!("{} — {}", doc.get_str("name")?, doc.get_i32("age")?);
-}
-```
-
-### Hide Sensitive Fields
-
-```rust
-// List all users without exposing passwords
-let cursor = users.find(doc! {})
-    .projection(doc! {
-        "password": 0,
-        "ssn": 0,
-        "secret_key": 0,
-    })?;
-```
-
-### Summary Views
-
-```rust
-// Get a summary of products (name and price only)
-let cursor = products.find(doc! {})
-    .projection(doc! {
-        "name": 1,
-        "price": 1,
-        "_id": 0,
-    })?;
-```
-
-## Performance Considerations
-
-- **Covered queries** — When all projected fields are part of an index, MongoLite can satisfy the query entirely from the index without reading documents.
-- **Reduced I/O** — Projecting fewer fields reduces the amount of data read from disk.
-- **Network/memory** — Smaller result sets use less memory and are faster to serialize.
-
-```rust
-// This query can be covered by an index on { status: 1, name: 1 }
-let cursor = users
-    .find(doc! { "status": "active" })
-    .projection(doc! { "name": 1, "_id": 0 })?;
-```
-
-## Projection with Aggregation
-
-In aggregation pipelines, projection is done with the `$project` stage:
-
-```rust
-let pipeline = vec![
-    doc! { "$match": { "status": "active" } },
-    doc! { "$project": {
-        "name": 1,
-        "age": 1,
-        "is_adult": { "$gte": ["$age", 18] },
-        "_id": 0,
-    }},
-];
-
-let results = users.aggregate(pipeline)?;
-```
-
-The `$project` stage in aggregation is more powerful than query projection — it can compute new fields, rename fields, and apply expressions.
+See also: [Query Operators](01-query-operators.md)

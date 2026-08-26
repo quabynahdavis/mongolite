@@ -1,185 +1,88 @@
-# Write-Ahead Log (WAL)
+# WAL (Write-Ahead Log)
 
-The Write-Ahead Log (WAL) is MongoLite's mechanism for ensuring durability and crash recovery. All modifications are written to the WAL before they are applied to the main data pages.
+MongoLite ships with a minimal but robust **write-ahead log (WAL)** to
+guarantee crash safety without locking the main database file.
 
-## Why WAL?
+## Companion File
 
-Without a WAL, a crash during a write could leave the database in an inconsistent state. The WAL solves this by:
-
-1. Recording every modification before it is applied.
-2. Allowing the system to replay or undo modifications after a crash.
-3. Guaranteeing that committed data is never lost.
-
-## Architecture
+Every `.mongoLite` database has an associated WAL file:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   Write Operation                    │
-├─────────────────────────────────────────────────────┤
-│  1. Serialize modification to WAL record            │
-│  2. Append record to WAL buffer                     │
-│  3. fsync WAL buffer to disk                        │
-│  4. Apply modification to memory-mapped pages       │
-│  5. Mark pages as dirty                             │
-└─────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────┐
-│                  Checkpoint Process                  │
-├─────────────────────────────────────────────────────┤
-│  1. Flush all dirty pages to disk                   │
-│  2. Record checkpoint marker in WAL                 │
-│  3. Truncate WAL up to checkpoint                   │
-└─────────────────────────────────────────────────────┘
+mydb.mongolite       ← main DB file (memory-mapped)
+mydb.mongolite-wal   ← WAL log file (also memory-mapped)
 ```
 
-## WAL File Structure
+The WAL is created automatically on first write if it does not already exist.
 
-The WAL is stored in a separate region of the `.mongolite` file (or in a separate `.wal` file in future versions). It consists of a sequence of **records**:
+## WAL Record Format
 
-```
-┌─────────────────────────────────────────────────────┐
-│ WAL Header                                          │
-│   - magic number                                    │
-│   - version                                         │
-│   - last checkpoint LSN                             │
-├─────────────────────────────────────────────────────┤
-│ Record 1                                            │
-│   - LSN (Log Sequence Number)                       │
-│   - transaction ID                                  │
-│   - operation type                                  │
-│   - page ID                                         │
-│   - data length                                     │
-│   - before-image (for undo)                         │
-│   - after-image (for redo)                          │
-│   - CRC32 checksum                                  │
-├─────────────────────────────────────────────────────┤
-│ Record 2                                            │
-│   ...                                               │
-├─────────────────────────────────────────────────────┤
-│ Checkpoint Record                                   │
-│   - checkpoint LSN                                  │
-│   - active transactions                             │
-│   - dirty page table                                │
-└─────────────────────────────────────────────────────┘
-```
-
-## Log Sequence Numbers (LSN)
-
-Every WAL record is assigned a monotonically increasing **Log Sequence Number**. The LSN is used to:
-
-- Order records chronologically.
-- Determine which records need to be replayed during recovery.
-- Track the progress of checkpoints.
-
-## Record Types
-
-| Type | Description |
-|------|-------------|
-| `INSERT` | New document inserted into a page |
-| `UPDATE` | Existing document modified |
-| `DELETE` | Document removed from a page |
-| `PAGE_ALLOC` | New page allocated |
-| `PAGE_FREE` | Page deallocated |
-| `CHECKPOINT` | Checkpoint marker |
-| `TXN_BEGIN` | Transaction start |
-| `TXN_COMMIT` | Transaction commit |
-| `TXN_ABORT` | Transaction abort |
-
-## Write Path
-
-When a write operation occurs:
-
-1. **Serialize** the modification into a WAL record containing:
-   - The page being modified.
-   - The **before-image** (original data for undo).
-   - The **after-image** (new data for redo).
-
-2. **Append** the record to the WAL buffer in memory.
-
-3. **fsync** the WAL buffer to disk (guarantees durability).
-
-4. **Apply** the modification to the memory-mapped page.
-
-5. **Mark** the page as dirty in the page cache.
-
-## Checkpointing
-
-Checkpoints flush dirty pages to disk and allow WAL truncation:
-
-### Checkpoint Process
-
-1. Write a `CHECKPOINT` record to the WAL.
-2. Flush all dirty pages to the main data file.
-3. Write a `CHECKPOINT_END` record.
-4. Truncate the WAL up to the checkpoint LSN.
-
-### Checkpoint Triggers
-
-| Trigger | Condition |
-|---------|-----------|
-| Time-based | Every 60 seconds |
-| WAL size | When WAL exceeds 100 MiB |
-| Dirty pages | When > 25% of pages are dirty |
-| Manual | `db.checkpoint()?` |
-
-## Crash Recovery
-
-On startup, MongoLite checks if the database was cleanly shut down. If not, it performs crash recovery:
-
-### Recovery Process
-
-1. **Find the last checkpoint** in the WAL.
-2. **Redo phase** — Replay all WAL records after the checkpoint (forward recovery).
-3. **Undo phase** — Roll back any uncommitted transactions (backward recovery).
-4. **Verify** — Check page checksums to ensure consistency.
-
-### Redo Phase
-
-Starting from the checkpoint LSN, scan forward through the WAL:
+Each WAL record consists of:
 
 ```
-Checkpoint LSN: 100
-Records:  [101] [102] [103] [104] [105]
-           ─── Redo all records ──▶
+┌─ WalRecordHeader ─────────────────────┐
+│ page_id       : u32 │ target page in DB file |
+│ data_length   : u32 │ payload size in bytes   |
+│ checksum      : u32 │ CRC32 of payload        |
+└───────────────────────────────────────┘
+┌─ Payload (variable length) ───────────┐
+│ Raw page bytes to restore on replay   |
+│ Length == data_length                 |
+└───────────────────────────────────────┘
 ```
 
-For each record, reapply the after-image to the corresponding page.
+- The WAL is written sequentially from offset `WalHeader::SIZE` upwards.
+- A zero-length `data_length` terminates the stream — marks end of log.
+- Payloads are full-page images (not diffs).
 
-### Undo Phase
+## WAL Header (`WalHeader`)
 
-Scan backward from the end of the WAL:
+At offset `0` of the WAL file:
 
-```
-Records:  [101] [102] [103] [104] [105]
-           ◀── Undo uncommitted ───
-```
+| Field                  | Type | Notes                          |
+|------------------------|------|--------------------------------|
+| `magic`                | u32  | `0x57414C21` ("WAL!")          |
+| `page_size`            | u32  | Must match page size of DB     |
+| `last_committed_pages` | u32  | Page count at last checkpoint  |
+| `checksum`             | u32  | CRC32 of preceding fields      |
 
-For each uncommitted transaction, apply the before-image to reverse the modification.
+## Lifecycle
 
-## WAL Size Management
+1. **Open**: MongoLite opens the WAL (or creates one if missing).
+2. **Append**: Before flushing any changed pages to the main DB file,
+   `Wal::append_page(page_id, data)` copies the full page image into the WAL.
+3. **Checkpoint**: Once the DB is safely synced, `Wal::checkpoint()` resets the
+   write offset to `WalHeader::SIZE`, truncating future appends.
+4. **Replay**: On next open, if the WAL exists and contains records newer than
+   the last checkpoint, they are replayed into the DB file via
+   `Wal::replay()`.
 
-The WAL grows as records are appended. To prevent unbounded growth:
+## Flush & Sync Behavior
 
-- **Truncation** — After a checkpoint, old records are removed.
-- **Rotation** — When the WAL exceeds a maximum size, a new WAL segment is started.
-- **Compression** — (Future) WAL records can be compressed with zstd.
+| Action          | What Happens                             |
+|------------------|------------------------------------------|
+| `Wal::append_page`   | Appends a record to the in-memory mmap buffer. |
+| `Database::flush`    | Calls `File::flush()` which triggers `mmap.flush()` internally. |
+| `Wal::checkpoint`    | Updates `last_committed_pages` field and zeroes the write offset. |
+| `Drop<Wal>`          | Implicitly calls `File::flush()` to sync remaining log entries. |
 
-## Configuration
+## Error Handling
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `wal_enabled` | `true` | Enable/disable WAL (disabling risks data loss) |
-| `wal_sync_interval_ms` | 100 | Maximum time between WAL fsyncs |
-| `wal_max_size_mb` | 100 | Maximum WAL size before forced checkpoint |
-| `checkpoint_interval_s` | 60 | Time between automatic checkpoints |
+| Scenario                        | Error Returned                |
+|----------------------------------|-------------------------------|
+| Invalid magic number             | `Error::Wal("invalid WAL magic")` |
+| CRC mismatch during replay       | `Error::Wal("WAL record checksum mismatch")` |
+| Corrupt header during open       | `Error::Wal("WAL header too short")` |
 
-## Trade-offs
+## Limitations
 
-| Setting | Durability | Performance |
-|---------|------------|-------------|
-| `fsync` every write | Highest | Slowest |
-| `fsync` every 100ms | High | Moderate |
-| `fsync` every 60s | Moderate | Fastest |
-| No WAL (in-memory) | None | Fastest |
+- WAL records are **full-page images**, not diffs. Therefore, large documents
+  cause significant I/O amplification — this may change in future versions
+  with differential logging.
+- The WAL is truncated (not archived). It acts purely as a transient log;
+  once checkpointed, prior history is lost.
+- Only **single-file** databases are supported. WAL replay assumes the same
+  file path exists.
 
-The default configuration (`fsync` every 100ms) provides a good balance between durability and performance for most workloads.
+---
+
+Related: [Page Format](01-pages.md) | [B+Tree Index](02-btree.md)

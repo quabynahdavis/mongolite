@@ -1,219 +1,102 @@
-# B+tree Indexes
+# B+Tree Index
 
-MongoLite uses B+tree indexes for efficient document retrieval. B+trees provide logarithmic-time lookups, insertions, and deletions, as well as efficient range scans.
+MongoLite uses a custom B+Tree implementation (`crates/mongolite/src/storage/btree.rs`)
+to store both the internal catalog of collections and each collection’s documents keyed
+by `_id`.
 
-## Structure
+## Data Model
 
-A B+tree is a balanced tree where:
+- Keys and values are arbitrary byte vectors (`Vec<u8>`).
+- Each tree has a root page managed by the `BTree<'a>` struct.
+- Trees are typed through `BTreeConfig` which sets the tree's fan-out/order.
 
-- **Internal nodes** contain keys and pointers to child nodes.
-- **Leaf nodes** contain keys and pointers to actual data (document locations).
-- **All leaf nodes** are linked together in a doubly-linked list for range scans.
-
-```
-                ┌─────────┐
-                │   50    │  ← Internal node
-                └────┬────┘
-           ┌─────────┴─────────┐
-     ┌─────┴─────┐       ┌─────┴─────┐
-     │  20 │ 35  │       │  70 │ 90  │  ← Internal nodes
-     └──┬──┴──┬──┘       └──┬──┴──┬──┘
-   ┌────┘     └──┐    ┌────┘     └──┐
-┌──┴──┐      ┌──┴──┐┌──┴──┐      ┌──┴──┐
-│10│15│      │25│30││55│60│      │75│80│  ← Leaf nodes
-└──┬──┘      └──┬──┘└──┬──┘      └──┬──┘
-   │            │      │            │
-   └────────────┴──────┴────────────┘
-         Doubly-linked list
-```
-
-## Properties
-
-| Property | Value |
-|----------|-------|
-| Order (fanout) | Variable; depends on key size and page size |
-| Height | O(log N) where N is the number of entries |
-| Leaf linkage | Doubly-linked list for range scans |
-| Balance | All leaves at the same depth |
-
-## Node Layout
-
-### Internal Node
-
-```
-┌─────────────────────────────────────────┐
-│ Page Header                             │
-├─────────────────────────────────────────┤
-│ Number of keys (2 bytes)                │
-│ Rightmost child pointer (4 bytes)       │
-├─────────────────────────────────────────┤
-│ Child 0 pointer (4 bytes)               │
-│ Key 1 (variable length)                 │
-│ Child 1 pointer (4 bytes)               │
-│ Key 2 (variable length)                 │
-│ ...                                     │
-│ Child N pointer (4 bytes)               │
-└─────────────────────────────────────────┘
-```
-
-### Leaf Node
-
-```
-┌─────────────────────────────────────────┐
-│ Page Header                             │
-├─────────────────────────────────────────┤
-│ Number of entries (2 bytes)             │
-│ Left sibling page ID (4 bytes)          │
-│ Right sibling page ID (4 bytes)         │
-├─────────────────────────────────────────┤
-│ Key 1 │ Document pointer (8 bytes)      │
-│ Key 2 │ Document pointer                │
-│ ...                                    │
-│ Key N │ Document pointer                │
-└─────────────────────────────────────────┘
-```
-
-## Operations
-
-### Lookup
-
-1. Start at the root node.
-2. At each internal node, find the smallest key greater than the search key.
-3. Follow the corresponding child pointer.
-4. Repeat until a leaf node is reached.
-5. Search the leaf node for the exact key.
-
-**Time complexity:** O(log N)
-
-### Insertion
-
-1. Navigate to the appropriate leaf node.
-2. Insert the key-value pair in sorted order.
-3. If the leaf is full, **split** it:
-   - Create a new leaf node.
-   - Move half the entries to the new node.
-   - Insert a separator key in the parent.
-4. If the parent is full, split recursively up to the root.
-5. If the root splits, create a new root (tree grows in height).
-
-**Time complexity:** O(log N)
-
-### Deletion
-
-1. Navigate to the leaf containing the key.
-2. Remove the key-value pair.
-3. If the leaf is less than half full:
-   - Try to **borrow** an entry from a sibling.
-   - If borrowing is not possible, **merge** with a sibling.
-4. Update parent keys if necessary.
-
-**Time complexity:** O(log N)
-
-### Range Scan
-
-1. Navigate to the first leaf node containing the range start.
-2. Scan forward through the linked leaf nodes.
-3. Stop when the range end is reached.
-
-**Time complexity:** O(log N + K) where K is the number of results.
-
-## Splitting
-
-When a node becomes full (exceeds the page size), it is split:
-
-```
-Before split (leaf with 4 entries, max 3):
-┌─────────────────┐
-│ 10 │ 20 │ 30 │ 40 │
-└─────────────────┘
-
-After split:
-┌──────────┐         ┌──────────┐
-│ 10 │ 20  │ ──────▶ │ 30 │ 40  │
-└──────────┘         └──────────┘
-     │
-     │ separator key: 30
-     ▼
-  Parent updated
-```
-
-## Merging
-
-When a node becomes less than half full after deletion, it may merge with a sibling:
-
-```
-Before merge:
-┌──────────┐         ┌──────────┐
-│ 10 │ 20  │ ──────▶ │ 30 │     │  (underflow)
-└──────────┘         └──────────┘
-
-After merge:
-┌──────────────────────┐
-│ 10 │ 20 │ 30         │
-└──────────────────────┘
-```
-
-## Index Types
-
-### Single-Field Index
+## Configuration
 
 ```rust
-// Index on a single field
-collection.create_index(doc! { "age": 1 }, IndexOptions::new())?;
+pub struct BTreeConfig {
+    pub order: usize, // Max number of keys in an internal/leaf node
+}
 ```
 
-### Compound Index
+The default `order` is computed dynamically via `max_order(page_size)`
+to ensure each node fits within a single page.
+
+## Leaf Node Layout
+
+```
+[PageHeader (8B)]
+[ num_keys : u32 ]
+[ next_leaf_page : u32 ]
+[[ key_len:u32 ][ key ] [ value_len:u32 ][ value ]] * num_keys
+```
+
+All leaf pages form a doubly-linked chain through `next_leaf_page`.
+
+## Internal Node Layout
+
+```
+[PageHeader (8B)]
+[ num_keys : u32 ]
+[ child_page_id:u32 ] [ [ key_len:u32 ][ key ] [ child_page_id:u32 ] ] * num_keys
+```
+
+An internal node contains exactly `num_keys + 1` child pointers.
+
+## Insertion
+
+1. Descend the tree to the appropriate leaf node by comparing keys.
+2. If the leaf is full (`num_keys >= order`), split it in half and promote the
+   median key upward.
+3. If internal nodes overflow during promotion, recursively split them.
+4. Splits may propagate up to the root; a new root is allocated if necessary.
+
+## Deletion
+
+1. Descend to the leaf node containing the target key.
+2. Remove the `(key, value)` pair from the payload section.
+3. Compact remaining entries downward.
+4. No rebalancing is implemented yet — deletion shrinks nodes monotonically.
+   This can cause fragmentation but avoids complex underflow logic in early stages.
+
+## Searching / Iteration
+
+- Point lookups use standard binary search on keys.
+- Iteration walks the leaf chain left-to-right, providing sorted traversal.
+- Range queries perform a bounded scan starting at the first key ≥ `start`.
+
+## Statistics
+
+Each B+Tree exposes `BTreeStats`:
 
 ```rust
-// Index on multiple fields
-collection.create_index(
-    doc! { "last_name": 1, "first_name": 1 },
-    IndexOptions::new(),
-)?;
+pub struct BTreeStats {
+    pub height: usize,         // Tree depth
+    pub leaf_nodes: usize,     // Number of leaf pages
+    pub internal_nodes: usize, // Number of internal pages
+    pub total_keys: usize,     // Total documents across all leaves
+}
 ```
 
-### Unique Index
+## Example Usage
 
 ```rust
-// Enforce uniqueness
-collection.create_index(
-    doc! { "email": 1 },
-    IndexOptions::new().unique(true),
-)?;
+use crate::storage::btree::{BTree, BTreeConfig};
+
+let mut tree = BTree::new(&mut allocator, BTreeConfig { order: 4 })?;
+
+// Insert
+tree.insert(b"hello", b"world")?;
+
+// Lookup
+let value = tree.get(b"hello")?;
+
+// Iterate keys in order
+let entries = tree.iter()?;
+
+// Remove
+tree.delete(b"hello")?;
 ```
 
-### Multikey Index (Array Fields)
+---
 
-When indexing a field that contains an array, MongoLite creates a **multikey index** — one entry per array element:
-
-```rust
-// Document: { tags: ["rust", "database"] }
-// Index on "tags" creates two entries:
-//   "rust" → document pointer
-//   "database" → document pointer
-```
-
-## Index Selectivity
-
-The query planner uses index statistics to choose the most efficient index:
-
-- **Selective indexes** (many distinct values) are preferred for equality matches.
-- **Compound indexes** follow the **ESR rule**: Equality, Sort, Range fields in that order.
-
-## Concurrency
-
-B+tree operations use **latch coupling** (crabbing):
-
-1. Pin the parent node with a shared latch.
-2. Pin the child node with the appropriate latch.
-3. Release the parent latch if the child is safe (not full/empty).
-4. Continue down the tree.
-
-This allows concurrent reads and minimizes write contention.
-
-## Future Enhancements
-
-- **Bulk loading** — Efficient index construction for large data imports.
-- **Partial indexes** — Index only documents matching a filter expression.
-- **TTL indexes** — Automatic expiration of documents after a time period.
-- **Geospatial indexes** — 2dsphere indexes for location queries.
+Next: [WAL format](03-wal.md)

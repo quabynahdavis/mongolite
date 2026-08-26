@@ -1,14 +1,24 @@
 # API Documentation Changelog
 
-All notable changes to the API documentation will be recorded in this file.
-
 ## [Unreleased]
 
-## [0.1.0] — 2026-08-25
+No changes since v0.1.0.
+
+## [0.1.0] – 2026-08-26
+
+First full reference documentation for the public API surface.
 
 ### Added
-- `OVERVIEW.md` — API documentation index with core types and error handling overview.
-- `CHANGELOG.md` — Initial changelog.
-- `01-database.md` — Initial draft of the Database API reference.
-- `02-collection.md` — Initial draft of the Collection API reference.
-- `03-cursor.md` — Initial draft of the Cursor API reference.
+
+- `01-database.md`:
+  - `Database::create`, `Database::open`
+  - `Database::collection`, `Database::list_collections`
+  - `Database::drop_collection`, `Database::flush`
+- `02-collection.md`:
+  - Methods: `insert_one`, `insert_many`, `find`, `find_one`,
+    `find_with_options`, `count`, `update_one`, `update_many`,
+    `delete_one`, `delete_many`, `drop`
+  - Result structs documented
+- `03-cursor.md`:
+  - Iterator trait usage
+  - `project`, `sort` helpers

@@ -1,14 +1,23 @@
 # Architecture Documentation Changelog
 
-All notable changes to the architecture documentation will be recorded in this file.
-
 ## [Unreleased]
 
-## [0.1.0] — 2026-08-25
+No changes.
+
+## [0.1.0] – 2026-08-26
+
+Initial architectural documentation set.
 
 ### Added
-- `OVERVIEW.md` — Architecture documentation index and design principles.
-- `CHANGELOG.md` — Initial changelog.
-- `01-file-format.md` — Initial draft of the `.mongolite` file format specification.
-- `02-storage-engine.md` — Initial draft of the storage engine architecture.
-- `03-document-model.md` — Initial draft of the BSON document model reference.
+
+- `01-file-format.md`:
+  - File header fields
+  - Page layout breakdown
+  - Page type enums
+- `02-storage-engine.md`:
+  - Core abstractions (File, Allocator, BTree, Wal, Pool)
+  - Insertion/deletion/search algorithms
+- `03-document-model.md`:
+  - BSON type mapping
+  - ObjectId generation scheme
+  - Nested document support status

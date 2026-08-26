@@ -1,14 +1,25 @@
 # Query Documentation Changelog
 
-All notable changes to the query documentation will be recorded in this file.
-
 ## [Unreleased]
 
-## [0.1.0] — 2026-08-25
+No changes.
+
+## [0.1.0] – 2026-08-26
+
+Initial query language documentation.
 
 ### Added
-- `OVERVIEW.md` — Query documentation index with operator category overview.
-- `CHANGELOG.md` — Initial changelog.
-- `01-query-operators.md` — Initial draft of the query operators reference.
-- `02-update-operators.md` — Initial draft of the update operators reference.
-- `03-projection.md` — Initial draft of the projection reference.
+
+- `01-query-operators.md`:
+  - Comparison (`$eq`, `$ne`, `$gt`, ..., `$lte`)
+  - Logical (`$and`, `$or`, `$nor`, `$not`)
+  - Element (`$exists`, `$type`)
+  - Evaluation (`$regex`)
+  - Array (`$in`, `$nin`, `$all`, `$size`, `$elemMatch`)
+- `02-update-operators.md`:
+  - `$set`, `$unset`
+  - Filter `_id` requirement note
+- `03-projection.md`:
+  - Projection rules
+  - Sorting behavior
+  - Skip/limit semantics

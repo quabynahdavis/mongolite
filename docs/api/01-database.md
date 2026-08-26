@@ -1,127 +1,83 @@
-# Database
+# Database API
 
-The `Database` type represents a single MongoLite database backed by a `.mongolite` file. It is the entry point for all database operations.
+The `Database` struct provides the entry point to working with MongoLite.
 
-## Opening a Database
-
-```rust
-use mongolite::Database;
-
-// Create or open a database file
-let db = Database::open("myapp.mongolite")?;
-```
-
-If the file does not exist, it will be created with default settings. If it exists, the database will be opened and its state restored (including WAL recovery if needed).
-
-### Options
-
-```rust
-use mongolite::DatabaseOptions;
-
-let opts = DatabaseOptions::new()
-    .page_size(8192)
-    .cache_size_mb(64)
-    .create_if_missing(true);
-
-let db = Database::open_with_options("myapp.mongolite", opts)?;
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `page_size` | 4096 | Page size in bytes (4096, 8192, 16384, or 32768) |
-| `cache_size_mb` | 32 | Maximum page cache size in megabytes |
-| `create_if_missing` | `true` | Create the file if it does not exist |
-| `read_only` | `false` | Open in read-only mode |
-
-## Getting a Collection
-
-```rust
-// Get or create a collection by name
-let users = db.collection("users");
-let products = db.collection("products");
-```
-
-Calling `collection()` does not allocate any resources until an operation is performed. Collections are created lazily on first write.
-
-## Listing Collections
-
-```rust
-// List all user-created collections
-let names = db.list_collections()?;
-for name in names {
-    println!("Collection: {}", name);
-}
-```
-
-## Dropping a Collection
-
-```rust
-// Drop a collection and all its data
-db.drop_collection("users")?;
-```
-
-This removes all documents, indexes, and metadata associated with the collection.
-
-## Database Statistics
-
-```rust
-// Get database-level statistics
-let stats = db.stats()?;
-println!("Collections: {}", stats.collection_count);
-println!("Documents: {}", stats.document_count);
-println!("Data size: {} bytes", stats.data_size);
-println!("File size: {} bytes", stats.file_size);
-```
-
-## Closing a Database
-
-```rust
-// Explicitly close the database (flushes all pending writes)
-db.close()?;
-```
-
-The database is also automatically closed when it is dropped (via the `Drop` trait), but explicit closing allows you to handle errors.
-
-## Read-Only Mode
-
-```rust
-// Open an existing database in read-only mode
-let opts = DatabaseOptions::new()
-    .read_only(true);
-
-let db = Database::open_with_options("myapp.mongolite", opts)?;
-```
-
-In read-only mode, any write operation will return an `InvalidArgument` error.
-
-## Example: Full Workflow
+## Importing
 
 ```rust
 use mongolite::Database;
-use bson::doc;
+```
 
-fn main() -> Result<(), mongolite::Error> {
-    let db = Database::open("example.mongolite")?;
+## Construction
 
-    // Create collections
-    let users = db.collection("users");
-    let orders = db.collection("orders");
+### `create<P: AsRef<Path>>(path: P) -> Result<Database>`
 
-    // Insert sample data
-    users.insert_one(doc! {
-        "name": "Alice",
-        "email": "alice@example.com",
-    })?;
+Creates a new database file at the given path. Fails if the file already exists.
 
-    // Check what collections exist
-    let names = db.list_collections()?;
-    assert!(names.contains(&"users".to_string()));
-    assert!(names.contains(&"orders".to_string()));
+```rust
+let mut db = Database::create("mydb.mongolite")?;
+```
 
-    // Clean up
-    db.drop_collection("orders")?;
+### `open<P: AsRef<Path>>(path: P) -> Result<Database>`
 
-    db.close()?;
-    Ok(())
+Opens an existing database file.
+
+```rust
+let mut db = Database::open("existing.mongolite")?;
+```
+
+## Methods
+
+### `collection(name: &str) -> Collection`
+
+Returns a handle to a named collection. The collection is auto-created on first
+insert — no explicit creation needed.
+
+```rust
+let mut users = db.collection("users");
+users.insert_one(doc! { "name": "Alice" })?;
+```
+
+### `list_collections() -> Result<Vec<String>>`
+
+Lists all collection names stored in the catalog.
+
+```rust
+for coll_name in db.list_collections()? {
+    println!("Collection: {}", coll_name);
 }
 ```
+
+### `drop_collection(name: &str) -> Result<bool>`
+
+Drops a named collection from the database.
+
+Returns `true` if the collection was found and deleted, `false` otherwise.
+
+```rust
+if db.drop_collection("temp_data")? {
+    println!("Dropped temp_data collection");
+}
+```
+
+### `flush(&mut self) -> Result<()>`
+
+Forces pending changes to be flushed to disk.
+
+```rust
+db.flush()?; // Ensure durability after writes
+```
+
+## Internal Accessors (Used Mostly by Tests)
+
+These methods are hidden behind `pub(crate)` visibility:
+
+- `allocator_mut(&mut self) -> &mut Allocator`
+- `catalog_mut(&mut self) -> &mut BTree`
+
+They are exposed here for completeness, but should not be called outside the crate.
+
+## Error Variants
+
+See [docs/CHANGELOG.md](../../CHANGELOG.md) for version history. For runtime
+error definitions, refer to the [Error enum API documentation](02-collection.md).

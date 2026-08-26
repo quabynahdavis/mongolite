@@ -1,157 +1,87 @@
-# Cursor
+# Cursor API
 
-A `Cursor` is an iterator over the results of a `find` query. Cursors provide a memory-efficient way to process large result sets.
+The `Cursor` struct enables lazy evaluation of query results, yielding documents
+one-by-one like a streaming iterator.
+
+## Importing
+
+```rust
+use mongolite::Cursor;
+```
 
 ## Creating a Cursor
 
-Cursors are created by calling `find()` on a `Collection`:
+A `Cursor` is constructed from any existing `Vec<Document>` returned by
+`Collection::find()`, typically via intermediate helpers in the `cursor` module
+(e.g., `Cursor::new(docs)`).
+
+## Iterator Trait
+
+Cursors implement Rust’s standard `Iterator` interface:
 
 ```rust
-let cursor = users.find(doc! { "age": { "$gte": 18 } })?;
-```
-
-## Iterating
-
-### For Loop
-
-```rust
-for doc in cursor {
-    let doc = doc?;
-    println!("{:?}", doc);
+let mut cursor = collection.find(None)?;
+while let Some(doc) = cursor.next() {
+    println!("{}", doc);
 }
 ```
 
-### Collect All
+This allows easy integration with functional idioms:
 
 ```rust
-let docs: Vec<Document> = cursor.collect::<Result<_, _>>()?;
+let names = collection.find(None)?
+    .filter(|d| d.get_str("active").unwrap_or(false))
+    .map(|d| d.get_str("name").unwrap_or("?"))
+    .collect::<Vec<_>>();
 ```
 
-## Cursor Options
+## Cursor States
 
-Cursors can be configured with sorting, skipping, and limiting:
+| State       | Description                        |
+|-------------|------------------------------------|
+| Open        | Has unprocessed documents         |
+| Closed      | End reached                       |
+| Exhausted   | `.next()` returns `None`          |
+
+There are no intermediate states; cursors do not buffer ahead beyond what
+`find()` already loaded.
+
+## Projection Helper
+
+Located in `crates/mongolite/src/cursor.rs`:
 
 ```rust
-let cursor = users
-    .find(doc! { "status": "active" })
-    .sort(doc! { "age": -1 })   // descending
-    .skip(10)                    // skip first 10
-    .limit(50)                   // return at most 50
-    .batch_size(100);            // internal batch size
+pub fn project(doc: &Document, spec: &Document) -> Document
 ```
 
-### Sort
+Selectively includes/excludes fields from a document.
+
+Rules:
+- Cannot mix inclusion and exclusion (except `_id`)
+- Empty spec returns original unchanged
+- Default behavior includes `_id` unless explicitly excluded
+
+## Sorting Helper
 
 ```rust
-// Ascending
-.sort(doc! { "name": 1 })
-
-// Descending
-.sort(doc! { "created_at": -1 })
-
-// Compound sort
-.sort(doc! { "last_name": 1, "first_name": 1 })
+pub fn sort(docs: &mut [Document], spec: &Document)
 ```
 
-| Value | Meaning |
-|-------|---------|
-| `1` | Ascending order |
-| `-1` | Descending order |
+In-place sort of document slice according to specified field directions.
 
-### Skip
+Supported types:
+- Strings → lexicographic
+- Integers (`i32`, `i64`) → numeric
+- Doubles → numeric (with type coercion)
+- Booleans → false before true
 
-```rust
-// Skip the first N documents
-.skip(20)
-```
+## Error Handling
 
-### Limit
+Cursor construction does not perform filtering or sorting; errors arise only
+during `Iterator::next()` if underlying data access fails. These surface as
+`Error::Bson` or `Error::Corrupted`.
 
-```rust
-// Return at most N documents
-.limit(100)
+## Related
 
-// Limit of 0 means no limit (return all)
-```
-
-### Batch Size
-
-```rust
-// Number of documents fetched per internal read
-.batch_size(1000)
-```
-
-The batch size controls how many documents are fetched in a single storage operation. Larger batches reduce I/O overhead but use more memory.
-
-## Cursor Methods
-
-| Method | Description |
-|--------|-------------|
-| `next()` | Returns the next document, or `None` if exhausted |
-| `sort(spec)` | Set sort order |
-| `skip(n)` | Set number of documents to skip |
-| `limit(n)` | Set maximum number of documents to return |
-| `batch_size(n)` | Set internal fetch batch size |
-| `hint(index)` | Force use of a specific index |
-
-## Index Hints
-
-```rust
-// Force the query planner to use a specific index
-let cursor = users
-    .find(doc! { "age": { "$gte": 18 } })
-    .hint("age_1")?;
-```
-
-## Exhaustion and Reiteration
-
-A cursor is **exhausted** after iterating through all results. Calling `next()` after exhaustion returns `None`. To re-query, create a new cursor:
-
-```rust
-// First iteration
-for doc in cursor { /* ... */ }
-
-// Cursor is now exhausted — create a new one
-let cursor = users.find(doc! { "age": { "$gte": 18 } })?;
-```
-
-## Type-Safe Deserialization
-
-Cursors can deserialize documents directly into Rust types:
-
-```rust
-#[derive(Debug, Serialize, Deserialize)]
-struct User {
-    #[serde(rename = "_id")]
-    id: ObjectId,
-    name: String,
-    age: i32,
-}
-
-let cursor = users.find(doc! { "age": { "$gte": 18 } })?;
-for result in cursor {
-    let user: User = result?.deserialize()?;
-    println!("{} is {} years old", user.name, user.age);
-}
-```
-
-## Performance Considerations
-
-- **Batch size** — Increase for sequential scans over large collections; decrease for interactive queries where only a few documents are needed.
-- **Skip** — Large skip values are expensive because the cursor must traverse and discard all skipped documents. Consider using range queries on indexed fields instead.
-- **Limit** — Always use `limit()` when you only need a subset of results to avoid unnecessary I/O.
-
-## Example: Paginated Query
-
-```rust
-fn get_page(collection: &Collection, page: u64, per_page: u64) -> Result<Vec<Document>, Error> {
-    let cursor = collection
-        .find(doc! {})
-        .sort(doc! { "_id": 1 })
-        .skip(page * per_page)
-        .limit(per_page)
-        .batch_size(per_page as usize)?;
-
-    cursor.collect::<Result<Vec<_>, _>>()
-}
-```
+- [Collection API](02-collection.md) — where cursors originate
+- [Query Operators](../query/01-query-operators.md) — how filters work

@@ -1,92 +1,85 @@
-# Storage Engine
+# Storage Engine Architecture
 
-The storage engine is responsible for moving data between disk and memory. It manages page allocation, caching, and the read/write paths that all higher-level components depend on.
+## Overview
 
-## Architecture
+MongoLite implements a **custom, append-friendly B+Tree storage engine** built
+directly on top of OS memory mapping (`memmap2`). It avoids the overhead of
+traditional SQL database buffer pools by relying on the host OS page cache for
+read caching, while enforcing durability via explicit Write-Ahead Logging
+(WAL).
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                  Database Layer                       │
-├──────────────────────────────────────────────────────┤
-│               Collection Layer                        │
-├──────────────────────────────────────────────────────┤
-│                Query Engine                           │
-├──────────────────────────────────────────────────────┤
-│                Storage Engine                         │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │  Page    │  │  B+tree  │  │  WAL Manager      │  │
-│  │  Cache   │  │  Manager │  │  (Write-Ahead Log)│  │
-│  └──────────┘  └──────────┘  └───────────────────┘  │
-├──────────────────────────────────────────────────────┤
-│           Memory-Mapped I/O Layer                     │
-├──────────────────────────────────────────────────────┤
-│              .mongolite File                          │
-└──────────────────────────────────────────────────────┘
+ ┌─────────────────────────────────────────────────────────────┐
+ │                       Database Handle                       │
+ └──────────────────────────────┬──────────────────────────────┘
+                                │
+               ┌────────────────┴────────────────┐
+               ▼                                 ▼
+    ┌────────────────────┐            ┌────────────────────┐
+    │  Catalog (B-Tree)  │            │ User B-Tree Index  │
+    └──────────┬─────────┘            └──────────┬─────────┘
+               │                                 │
+               └────────────────┬────────────────┘
+                                │
+                                ▼
+                       ┌─────────────────┐
+                       │  Page Allocator │
+                       └────────┬────────┘
+                                │
+                                ▼
+                       ┌─────────────────┐
+                       │ File (MMIO)     │
+                       └─────────────────┘
 ```
 
-## Memory-Mapped I/O
+## Core Abstractions
 
-MongoLite uses memory-mapped I/O (`mmap`) as its primary mechanism for file access. The entire `.mongolite` file is mapped into the process's virtual address space, allowing the OS to handle paging data in and out of memory.
+### 1. `File` (`crates/mongolite/src/storage/file.rs`)
 
-### Advantages
+Wraps an `std::fs::File` combined with a read/write memory mapping
+(`memmap2::MmapMut`).
 
-- **Zero-copy reads** — Data is accessed directly from the OS page cache without copying into user-space buffers.
-- **OS-managed caching** — The kernel's page cache policy automatically keeps hot data in memory.
-- **Simplified I/O** — No need for explicit `read()`/`write()` syscalls; memory access is sufficient.
+- **Single responsibility**: Direct raw slice access (`file.page(id)`) and
+  mutations (`file.page_mut(id)`).
+- **Auto-expansion**: Calling `grow()` doubles the underlying mapped slice using
+  `set_len` + re-mapping.
+- **Dirty Page Tracking**: Keeps a `HashSet<u32>` of modified page IDs. Calling
+  `flush()` executes an OS-level sync of modified ranges via `mmap.flush()`.
 
-### Trade-offs
+### 2. `Allocator` (`crates/mongolite/src/storage/allocator.rs`)
 
-- **Address space** — Very large databases may require 64-bit address space.
-- **Control** — Less fine-grained control over eviction compared to a custom buffer pool.
+Manages page lifecycle (alloc / free) within the `File`.
 
-## Page Cache
+- Maintains an in-memory `free_list_head` initialized from the `FileHeader`.
+- If `free_list_head != 0`, `allocate()` pops the top page from the free chain.
+- If `free_list_head == 0`, `allocate()` forces `file.grow()` and returns the
+  first page of the new expanded space.
 
-While memory-mapped I/O handles the bulk of data access, MongoLite maintains a lightweight **page cache** layer that tracks:
+### 3. `BTree` (`crates/mongolite/src/storage/btree.rs`)
 
-- **Dirty pages** — Pages modified in memory but not yet flushed to disk.
-- **Pin count** — Prevents the OS from evicting pages that are actively being used.
-- **Page table** — Maps page IDs to their memory addresses.
+A generic B+Tree engine that operates on arbitrary byte slices (`Key = Vec<u8>`,
+`Value = Vec<u8>`).
 
-## Read Path
+- **Fan-out**: Configured via `BTreeConfig { order }`. Order defines the max
+  keys per node before a split is triggered. Default maximum order is dynamically
+  calculated based on page size.
+- **Node Splits**: Splits happen proactively on insert if `num_keys >= order`.
+  Splitting divides entries into two half-filled pages and promotes the median key to
+  the parent node.
+- **Leaf Linking**: All leaf pages maintain a forward pointer (`next_leaf_page`),
+  enabling **O(1) sequential page traversals** for fast iteration and range scans.
 
-1. The query engine requests a page by its `page_id`.
-2. The storage engine checks the page cache for a pinned reference.
-3. If not cached, the page is accessed via the memory-mapped region.
-4. The OS loads the page from disk if it is not already in the page cache.
-5. The page data is returned to the caller.
+### 4. `Wal` (`crates/mongolite/src/storage/wal.rs`)
 
-## Write Path
+Guarantees crash safety.
 
-1. The query engine requests a page modification.
-2. The storage engine first writes the change to the **WAL** (see [WAL documentation](../storage/03-wal.md)).
-3. The WAL entry is `fsync`'d to guarantee durability.
-4. The page is modified in the memory-mapped region.
-5. The page is marked dirty in the page cache.
-6. Dirty pages are periodically flushed to disk by the background writer.
+- Write operations append page deltas to a companion `.mongolite-wal` file.
+- Before dirty pages in the main `.mongolite` file are flushed to disk, the WAL is
+  synced.
+- On startup (`Database::open`), MongoLite checks for an existing WAL file and
+  replays uncommitted changes to restore consistency.
 
-## Page Allocation
+### 5. `PagePool` (`crates/mongolite/src/storage/pool.rs`)
 
-When a new page is needed:
-
-1. Check the **free list** (linked list of deallocated pages).
-2. If the free list is non-empty, pop a page from the head.
-3. If the free list is empty, extend the file and allocate from the new region.
-4. Update the file header's `page_count` and (if applicable) `free_list_head`.
-
-## Concurrency
-
-The storage engine uses the following concurrency model:
-
-- **Read operations** — Multiple concurrent readers are allowed; no locking required for read-only access.
-- **Write operations** — A single writer mutex serializes modifications to prevent corruption.
-- **WAL writes** — Appends to the WAL are serialized through a dedicated lock.
-
-> **Note:** Future versions may implement multi-readers-single-writer (MRSW) page-level locking for higher concurrency.
-
-## Background Writer
-
-A background thread periodically flushes dirty pages to disk:
-
-- **Checkpoint interval** — Every 60 seconds (configurable).
-- **Dirty threshold** — If more than 25% of pages are dirty, trigger an early checkpoint.
-- **WAL truncation** — After a successful checkpoint, old WAL entries are truncated to reclaim space.
+An optional LRU cache wrapper around physical pages to minimize re-reading
+frequently accessed pages when memory mapping is un-featured (e.g., WASM targets).

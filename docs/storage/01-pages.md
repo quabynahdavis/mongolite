@@ -1,177 +1,60 @@
 # Pages
 
-Pages are the fundamental unit of storage in MongoLite. All data — documents, indexes, and metadata — is organized into fixed-size pages within the `.mongolite` file.
+MongoLite uses a **fixed-size page abstraction** for all storage operations.
+All file offsets are rounded up to the nearest page boundary, and physical I/O
+happens in page-sized chunks.
 
-## Page Size
+## Constants
 
-The default page size is **4096 bytes** (4 KiB). This can be configured at database creation time:
+| Constant            | Value | Meaning                          |
+|---------------------|-------|----------------------------------|
+| `DEFAULT_PAGE_SIZE` | `4096`| Default page size in bytes.      |
+| `PageHeader::SIZE`  | `8`   | Fixed size of every page header. |
 
-| Size | Use Case |
-|------|----------|
-| 4096 | Default; good for most workloads |
-| 8192 | Large documents, fewer page splits |
-| 16384 | Analytical workloads, sequential scans |
-| 32768 | Very large documents, bulk inserts |
+Page sizes smaller than 512 bytes or not powers of two are rejected at file
+creation time.
 
-Once set, the page size cannot be changed without recreating the database.
+## Page Header Structure
 
-## Page Layout
+The first 8 bytes of every page contain control data.
 
-Every page has a small header followed by type-specific data:
-
-```
-┌─────────────────────────────────────────┐
-│ Page Header (12 bytes)                  │
-│   - page_type  (2 bytes)                │
-│   - flags      (2 bytes)                │
-│   - page_id    (4 bytes)                │
-│   - checksum   (4 bytes)                │
-├─────────────────────────────────────────┤
-│ Page Data (page_size - 12 bytes)        │
-│   - type-specific content               │
-└─────────────────────────────────────────┘
-```
+| Byte Range | Field       | Type  | Description                            |
+|------------|-------------|-------|----------------------------------------|
+| `[0]`      | `page_type` | `u8`  | See next section.                      |
+| `[1]`      | `flags`     | `u8`  | Reserved for future flags (unused for now). |
+| `[2..4]`   | `padding`   | `u16` | Unused, set to zero.                   |
+| `[4..8]`   | `checksum`  | `u32` | CRC32 of everything from byte `8` onwards. |
 
 ## Page Types
 
-### Header Page (Page 0)
+| Raw Value | Symbol         | Description                        |
+|-----------|----------------|------------------------------------|
+| `0x00`    | `Free`         | Part of the free list              |
+| `0x01`    | `BTreeLeaf`    | Leaf node in B+Tree                |
+| `0x02`    | `BTreeInternal`| Internal routing node              |
+| `0x03`    | `Overflow`     | Overflow record for big payloads   |
+| `0x04`    | `Catalog`      | Catalog/metadata page              |
 
-The first page of the file. Contains the file header with global metadata (see [File Format](../architecture/01-file-format.md)).
+## Reading and Writing
 
-### Index Leaf Page
+- Immutable reads happen through `File::page(id)` which returns `&[u8]`.
+- Mutable writes go through `File::page_mut(id)` which returns `&mut [u8]`,
+  marks the page as dirty, and returns mutable access.
+- After mutation, the caller must invoke `PageMut::compute_checksum()` and
+  `PageMut::write_header()` to persist integrity data.
 
-Stores the leaf nodes of a B+tree index. Contains sorted key-pointer pairs:
+## Integrity Checks
 
-```
-┌─────────────────────────────────────────┐
-│ Page Header                             │
-├─────────────────────────────────────────┤
-│ Number of entries (4 bytes)             │
-│ Right sibling page ID (4 bytes)         │
-├─────────────────────────────────────────┤
-│ Key 1 │ Value 1 (document pointer)      │
-│ Key 2 │ Value 2                         │
-│ ...                                    │
-│ Key N │ Value N                         │
-└─────────────────────────────────────────┘
-```
+On every call to `Page::new(data)`:
 
-### Index Internal Page
+- The raw page type is validated against known types.
+- The CRC32 checksum stored in the header is compared to one computed from the
+  page payload.
+- Mismatches generate `Error::Corrupted`.
 
-Stores the internal (non-leaf) nodes of a B+tree. Contains keys and child page pointers:
+Checksums are **not verified on normal operation** inside the hot path, but can
+be explicitly checked via `Page::validate_checksum()`.
 
-```
-┌─────────────────────────────────────────┐
-│ Page Header                             │
-├─────────────────────────────────────────┤
-│ Number of children (4 bytes)            │
-├─────────────────────────────────────────┤
-│ Child 0 │ Key 1 │ Child 1 │ Key 2 │ ...│
-│ ...        │ Child N                      │
-└─────────────────────────────────────────┘
-```
+---
 
-### Data Page
-
-Stores raw document data. Documents are packed sequentially:
-
-```
-┌─────────────────────────────────────────┐
-│ Page Header                             │
-├─────────────────────────────────────────┤
-│ Free space offset (2 bytes)             │
-│ Number of records (2 bytes)             │
-├─────────────────────────────────────────┤
-│ Slot Array (grows from start)           │
-│   [offset: 2, length: 2]               │
-│   [offset: 2, length: 2]               │
-│   ...                                  │
-├─────────────────────────────────────────┤
-│ Free Space                              │
-├─────────────────────────────────────────┤
-│ Records (grow from end)                 │
-│   ┌───────────────────────┐            │
-│   │ BSON Document         │            │
-│   └───────────────────────┘            │
-│   ┌───────────────────────┐            │
-│   │ BSON Document         │            │
-│   └───────────────────────┘            │
-└─────────────────────────────────────────┘
-```
-
-### Catalog Page
-
-Stores collection metadata: names, index definitions, and statistics.
-
-### Overflow Page
-
-When a document exceeds the available space in a data page, it spills into one or more overflow pages linked together.
-
-### Free Page
-
-A page that has been deallocated and is available for reuse. Free pages form a singly-linked list.
-
-## Page Allocation
-
-### Allocation Strategy
-
-1. **Free list first** — Check the free list for a reusable page.
-2. **Extend file** — If the free list is empty, allocate from the end of the file.
-
-### File Extension
-
-When the file needs to grow:
-
-| Current Size | Extension Amount |
-|--------------|------------------|
-| < 1 MiB | Double the file |
-| 1 MiB – 64 MiB | Double the file |
-| > 64 MiB | Add 64 MiB |
-
-This doubling strategy balances between frequent small allocations and excessive memory reservation.
-
-## Free List
-
-The free list is a singly-linked list of deallocated pages. The head pointer is stored in the file header.
-
-```
-File Header
-    │
-    ▼
-┌────────┐    ┌────────┐    ┌────────┐
-│ Page 4 │───▶│ Page 9 │───▶│ Page 2 │───▶ 0 (null)
-│ (free) │    │ (free) │    │ (free) │
-└────────┘    └────────┘    └────────┘
-```
-
-When a page is freed:
-1. Its `page_type` is set to `PAGE_FREE`.
-2. The next free page ID is written into the page's data area.
-3. The file header's `free_list_head` is updated to point to this page.
-
-## Page Pinning
-
-The page cache tracks **pin counts** to prevent the OS from evicting pages that are actively in use:
-
-- A page is **pinned** when a component holds a reference to it.
-- A page is **unpinned** when the reference is released.
-- Only **unpinned** pages can be evicted from the cache.
-
-```rust
-// Conceptual API (internal)
-let page = page_cache.pin(page_id)?;
-// ... use the page ...
-page_cache.unpin(page_id)?;
-```
-
-## Checksums
-
-Every page has a CRC32 checksum in its header. The checksum is computed over the page data (excluding the checksum field itself) and verified on every page load. If a checksum mismatch is detected, MongoLite attempts to recover the page from the WAL.
-
-## Page Compaction
-
-Over time, data pages can become fragmented due to deletions and updates. MongoLite performs **page compaction** during checkpoints:
-
-1. Documents are rearranged to eliminate gaps.
-2. Excess free space is consolidated.
-3. If a page becomes entirely empty, it is added to the free list.
+See also: [B+Tree internals](02-btree.md) | [WAL format](03-wal.md)

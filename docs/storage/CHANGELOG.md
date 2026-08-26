@@ -1,14 +1,24 @@
 # Storage Documentation Changelog
 
-All notable changes to the storage documentation will be recorded in this file.
-
 ## [Unreleased]
 
-## [0.1.0] — 2026-08-25
+No changes.
+
+## [0.1.0] – 2026-08-26
+
+Initial storage documentation release.
 
 ### Added
-- `OVERVIEW.md` — Storage documentation index and architecture overview.
-- `CHANGELOG.md` — Initial changelog.
-- `01-pages.md` — Initial draft of the page-based storage reference.
-- `02-btree.md` — Initial draft of the B+tree index reference.
-- `03-wal.md` — Initial draft of the write-ahead log reference.
+
+- `01-pages.md`:
+  - Page header byte layout
+  - Page type enum values
+  - Integrity checksum verification
+- `02-btree.md`:
+  - Leaf/internal node structures
+  - Insertion/splitting algorithm walkthrough
+  - Delete compaction steps
+- `03-wal.md`:
+  - Companion file naming convention
+  - Record header format
+  - Replay/flush/checkpoint flow

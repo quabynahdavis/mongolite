@@ -1,82 +1,120 @@
 # File Format
 
-MongoLite stores the entire database in a single `.mongolite` file. This document describes the on-disk structure of that file.
+## Disk Layout
 
-## Overview
-
-The `.mongolite` file is organized as a sequence of fixed-size pages. The first page (page 0) is always the **file header**, which contains metadata about the database. Subsequent pages are allocated by the storage engine for indexes, documents, and internal bookkeeping.
+A MongoLite database is stored in a **single memory-mapped file**
+named `*.mongolite`. The file is divided into fixed-size **pages** of
+`4096` bytes (default, must be a power of 2 ≥ 512).
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Page 0: File Header                            │
-├─────────────────────────────────────────────────┤
-│  Page 1: Root Index (default _id index)        │
-├─────────────────────────────────────────────────┤
-│  Page 2: Collection Catalog                     │
-├─────────────────────────────────────────────────┤
-│  Page 3+: Data pages, index pages, free list   │
-├─────────────────────────────────────────────────┤
-│  ...                                            │
-└─────────────────────────────────────────────────┘
+byte 0  ┌─────────────────────────────┐
+         │        File Header          │  40 bytes  (fixed)
+         ├─────────────────────────────┤
+         │                             │
+         │       Page 0               │  4096 bytes (root / catalog)
+         │                             │
+         ├─────────────────────────────┤
+         │       Page 1               │  4096 bytes
+         ├─────────────────────────────┤
+         │       Page 2               │
+         ├─────────────────────────────┤
+         │           …                │
+         └─────────────────────────────┘
 ```
 
-## File Header
+The file grows by **doubling** its size each time the allocator runs out of
+free pages (from 1 page → 2 → 4 → 8 → …). Growth is triggered by
+`File::grow()`, which maps the new (larger) file and zeros out the new
+half.
 
-The file header occupies the first 4096 bytes of the file (the first page). It contains:
+## File Header (`FileHeader`)
 
-| Offset | Size | Field | Description |
-|--------|------|-------|-------------|
-| 0 | 16 | `magic` | Magic bytes: `MONOLITE\x00\x00\x00\x00\x00\x00\x00` |
-| 16 | 4 | `version` | File format version (currently `1`) |
-| 20 | 4 | `page_size` | Size of each page in bytes (default: 4096) |
-| 24 | 8 | `page_count` | Total number of pages in the file |
-| 32 | 8 | `root_index_page` | Page ID of the root B+tree index |
-| 40 | 8 | `catalog_page` | Page ID of the collection catalog |
-| 48 | 8 | `free_list_head` | Page ID of the first free page (0 if none) |
-| 56 | 8 | `wal_offset` | Byte offset to the WAL region |
-| 64 | 32 | `uuid` | Unique database identifier (UUID v4) |
-| 96 | 3998 | `reserved` | Reserved for future use (zero-filled) |
+Written to the first bytes of page 0, the header holds all metadata
+required to open the database without scanning pages.
 
-## Page Structure
+| Offset | Field                | Type     | Notes |
+|--------|----------------------|----------|-------|
+| 0      | `magic`              | `[u8;4]` | `b"MDOC"` — validates file identity. |
+| 4      | `version_major`      | `u16`    | Currently `0`. |
+| 8      | `version_minor`      | `u16`    | Currently `1`. |
+| 12     | `page_size`          | `u32`    | Default `4096`. |
+| 16     | `total_pages`        | `u32`    | Current page count. |
+| 20     | `page_count_at_checkpoint` | `u32` | Last clean page count (WAL checkpoint). |
+| 24     | `free_list_head`     | `u32`    | Page ID of head of free list, or `0`. |
+| 28     | `catalog_root_page`  | `u32`    | B-Tree root page of the **catalog**. |
+| 32     | `wal_magic`          | `u32`    | WAL presence marker (reserved). |
+| 36     | `document_count`     | `u64`    | Total docs across all collections. |
+| 40     | `checksum`           | `u32`    | CRC32 of bytes `0..36`. |
 
-Every page in the file shares a common header:
+`FileHeader::compute_checksum()` excludes the `checksum` field itself so
+that a simple `==` comparison detects corruption after load.
 
-| Offset | Size | Field | Description |
-|--------|------|-------|-------------|
-| 0 | 2 | `page_type` | Type identifier (see below) |
-| 2 | 2 | `flags` | Page flags (dirty, pinned, etc.) |
-| 4 | 4 | `page_id` | Unique page identifier |
-| 8 | 4 | `checksum` | CRC32 checksum of page contents |
-| 12 | varies | `data` | Page-type-specific data |
+## Page Layout
+
+Every page begins with an 8-byte `PageHeader`:
+
+```
+offset 0  │ page_type (u8)   0x00=Free 0x01=Leaf 0x02=Internal …
+offset 1  │ flags (u8)
+offset 2  │ padding (u16)
+offset 4  │ checksum (u32)   CRC32 of payload bytes 8..end
+offset 8  │ payload begins…
+```
 
 ### Page Types
 
-| Value | Name | Description |
-|-------|------|-------------|
-| `0x01` | `PAGE_HEADER` | File header (page 0 only) |
-| `0x02` | `PAGE_INDEX_LEAF` | B+tree leaf node containing index entries |
-| `0x03` | `PAGE_INDEX_INTERNAL` | B+tree internal node containing child pointers |
-| `0x04` | `PAGE_DATA` | Raw document data |
-| `0x05` | `PAGE_CATALOG` | Collection metadata catalog |
-| `0x06` | `PAGE_OVERFLOW` | Overflow page for large documents |
-| `0x07` | `PAGE_FREE` | Free/available page |
+| Value | Name         | Used For |
+|-------|--------------|----------|
+| `0x00` | `Free`       | Recycled pages in the free list. |
+| `0x01` | `BTreeLeaf`  | B-Tree leaf nodes — stores key/value entries. |
+| `0x02` | `BTreeInternal` | B-Tree internal nodes — routing keys + child pointers. |
+| `0x03` | `Overflow`   | Large values that don't fit in a single leaf page. |
+| `0x04` | `Catalog`    | Reserved; catalog lives in a normal BTreeLeaf/Internal today. |
 
-## Page Size
+## B-Tree Leaf Page Layout
 
-The default page size is **4096 bytes** (4 KiB), matching the typical OS page size. This can be configured at database creation time to 8192, 16384, or 32768 bytes for workloads that benefit from larger pages.
+```
+[page_type=1][num_keys:u32][next_leaf_page:u32][entry_0][entry_1]…[entry_N]
+              ▲ 4 bytes            ▲ 4 bytes
+```
 
-## Free List
+Each **entry** is a packed, variable-length record:
 
-When pages are deleted (e.g., after document removal), they are added to a singly-linked free list. The head of this list is stored in the file header. When the storage engine needs a new page, it first checks the free list before extending the file.
+```
+[key_len:u32][key_bytes][value_len:u32][value_bytes]
+  4 bytes    key_len    4 bytes      value_len
+```
 
-## File Growth
+No separators or alignment are used between entries — offsets are computed
+by reading `key_len` and `value_len` in sequence.
 
-The `.mongolite` file grows by allocating new pages at the end. The storage engine uses a **doubling strategy** for file extensions: when the file needs to grow, it doubles the current size up to a threshold, then switches to fixed-size increments to avoid excessive allocation.
+## B-Tree Internal Page Layout
 
-## Future Extensions
+```
+[page_type=0][num_keys:u32][child_0:u32][key_0][child_1:u32][key_1][child_2]…
+```
 
-Planned additions to the file format:
+The invariant is `num_keys = num_children - 1`. Keys are sorted in
+ascending order; all keys in the subtree pointed to by `child_i` are
+`≤ key_i` and `> key_{i-1}`.
 
-- **Encryption header** — Support for AES-256-GCM encryption at rest.
-- **Compression flags** — Per-page compression using zstd.
-- **Sharding metadata** — For future distributed MongoLite deployments.
+## Overflow Pages
+
+Values (serialised BSON documents) larger than `(page_size - 8 - overhead)`
+are stored in one or more linked overflow pages. The leaf entry stores only
+the first page ID; subsequent pages are chained via `END_OF_CHAIN`
+(`0xFFFFFFFF`).
+
+## Free Page List
+
+Freed pages are chained via a singly-linked list stored **inline in the
+page payload** (first 4 bytes of the freed page point to the next free
+page). The head of the chain is stored in `FileHeader.free_list_head`.
+Allocation pops from the head; freeing pushes to the head. When the free
+list is empty, a new page is allocated from the end of the file.
+
+## WAL Companion File
+
+A `.mongolite-wal` file (created alongside the main file) holds the
+write-ahead log. Its layout and semantics are described in
+[docs/storage/03-wal.md](../storage/03-wal.md).
