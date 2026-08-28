@@ -197,7 +197,7 @@ impl<'a> Collection<'a> {
         }
     }
 
-    fn get_index(&self) -> Result<&'static BTree<'static>> {
+    fn get_index(&self) -> Result<BTree<'static>> {
         let name_key = self.name.as_bytes().to_vec();
         let allocator = self.db.allocator;
 
@@ -208,8 +208,7 @@ impl<'a> Collection<'a> {
                 crate::error::Error::Corrupted("invalid root page".into())
             })?);
 
-            let index = BTree::open(&mut *allocator, root_page, BTreeConfig { order: 4 })?;
-            Ok(Box::leak(Box::new(index)))
+            BTree::open(&mut *allocator, root_page, BTreeConfig { order: 4 })
         }
     }
 
