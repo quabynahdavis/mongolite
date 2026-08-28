@@ -1,6 +1,6 @@
 use bson::Document;
 
-use crate::db::{deserialize_id, serialize_id, Database};
+use crate::db::{serialize_id, Database};
 use crate::document::oid::ObjectId;
 use crate::document::Document as MongoDocument;
 use crate::error::Result;

@@ -161,14 +161,14 @@ impl<'a> BTree<'a> {
 
         let existing_data_len = {
             let mut len = 0;
-            for i in 0..num_keys {
+            for _ in 0..num_keys {
                 let offset = data_start + len;
                 len += entry_size_at(page_data, offset);
             }
             len
         };
 
-        let new_entry_len = 4 + key.len() + 4 + value.len();
+        let _new_entry_len = 4 + key.len() + 4 + value.len();
         let tail_offset = entry_offset;
         let tail_len = existing_data_len - (tail_offset - data_start);
 
@@ -243,7 +243,7 @@ impl<'a> BTree<'a> {
         key: &[u8],
         value: &[u8],
     ) -> Result<Option<(Vec<u8>, u32)>> {
-        let (num_keys, child_page) = {
+        let (_num_keys, child_page) = {
             let page_data = self.allocator.file().page(page_id);
             let num_keys = read_u32_at(page_data, PageHeader::SIZE + 1) as usize;
             let child_page = find_child_for_key(page_data, key, num_keys);
@@ -409,7 +409,7 @@ impl<'a> BTree<'a> {
         if page_data[PageHeader::SIZE] == 1 {
             let num_keys = read_u32_at(page_data, PageHeader::SIZE + 1) as usize;
             let mut cursor = PageHeader::SIZE + 9;
-            for i in 0..num_keys {
+            for _i in 0..num_keys {
                 let k = read_bytes_at(page_data, cursor);
                 let entry_start = cursor;
                 cursor += 4 + k.len();

@@ -56,15 +56,17 @@ impl Database {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn allocator_mut(&mut self) -> &mut Allocator<'static> {
         unsafe { &mut *self.allocator }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn catalog_mut(&mut self) -> &mut BTree<'static> {
         unsafe { &mut *self.catalog }
     }
 
-    pub fn collection(&mut self, name: &str) -> Collection {
+    pub fn collection(&mut self, name: &str) -> Collection<'_> {
         Collection::new(name, self)
     }
 
@@ -95,6 +97,7 @@ impl Database {
         self.file.flush()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn file_mut(&mut self) -> &mut File {
         self.file
     }
@@ -110,6 +113,7 @@ pub(crate) fn serialize_id(id: ObjectId) -> Vec<u8> {
     id.as_bytes().to_vec()
 }
 
+#[allow(dead_code)]
 pub(crate) fn deserialize_id(bytes: &[u8]) -> Result<ObjectId> {
     if bytes.len() != 12 {
         return Err(Error::Corrupted("invalid _id length".into()));
@@ -122,7 +126,6 @@ pub(crate) fn deserialize_id(bytes: &[u8]) -> Result<ObjectId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::Document;
     use tempfile::TempDir;
 
     fn create_test_db() -> (Database, TempDir) {

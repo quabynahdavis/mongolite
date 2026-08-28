@@ -15,7 +15,7 @@ fn main() {
         _ => PathBuf::from(&args[1]),
     };
 
-    let mut db = match Database::create(&path) {
+    let db = match Database::create(&path) {
         Ok(db) => db,
         Err(_) => Database::open(&path).expect("Failed to open database"),
     };

@@ -2,7 +2,6 @@ use std::io::{self, Write};
 
 use bson::Document;
 
-use crate::collection::Collection;
 use crate::db::Database;
 use crate::error::Result;
 
