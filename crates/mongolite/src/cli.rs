@@ -167,8 +167,9 @@ impl Cli {
         }
 
         let coll_name = parts[0];
-        let filter: Document = serde_json::from_str(parts[1])
-            .map_err(|e| crate::error::Error::InvalidQuery(format!("invalid filter JSON: {}", e)))?;
+        let filter: Document = serde_json::from_str(parts[1]).map_err(|e| {
+            crate::error::Error::InvalidQuery(format!("invalid filter JSON: {}", e))
+        })?;
 
         let mut coll = self.db.collection(coll_name);
         let result = coll.delete_many(filter)?;
@@ -205,8 +206,10 @@ mod tests {
     fn test_cli_insert_and_find() {
         let (mut cli, _dir) = create_test_cli();
 
-        cli.execute(r#"insert users {"name": "Alice", "age": 30}"#).unwrap();
-        cli.execute(r#"insert users {"name": "Bob", "age": 25}"#).unwrap();
+        cli.execute(r#"insert users {"name": "Alice", "age": 30}"#)
+            .unwrap();
+        cli.execute(r#"insert users {"name": "Bob", "age": 25}"#)
+            .unwrap();
 
         let coll = cli.db.collection("users");
         let docs = coll.find(None).unwrap();
