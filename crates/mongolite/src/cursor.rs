@@ -71,10 +71,7 @@ impl Projection {
                     }
                 }
             }
-            let include_id = projection
-                .get("_id")
-                .map(|v| is_true(v))
-                .unwrap_or(true);
+            let include_id = projection.get("_id").map(is_true).unwrap_or(true);
             if include_id {
                 if let Some(id) = doc.get("_id") {
                     result.insert("_id", id.clone());
@@ -82,10 +79,7 @@ impl Projection {
             }
         } else {
             for (key, val) in doc {
-                let should_exclude = projection
-                    .get(key)
-                    .map(|v| !is_true(v))
-                    .unwrap_or(false);
+                let should_exclude = projection.get(key).map(|v| !is_true(v)).unwrap_or(false);
                 if !should_exclude {
                     result.insert(key.clone(), val.clone());
                 }
@@ -126,11 +120,7 @@ impl Sorter {
                 let b_val = b.get(key);
                 let cmp = cmp_bson_values(a_val, b_val);
                 if cmp != std::cmp::Ordering::Equal {
-                    return if direction >= 0 {
-                        cmp
-                    } else {
-                        cmp.reverse()
-                    };
+                    return if direction >= 0 { cmp } else { cmp.reverse() };
                 }
             }
             std::cmp::Ordering::Equal
@@ -143,7 +133,9 @@ fn cmp_bson_values(a: Option<&Bson>, b: Option<&Bson>) -> std::cmp::Ordering {
         (Some(a), Some(b)) => match (a, b) {
             (Bson::Int32(a), Bson::Int32(b)) => a.cmp(b),
             (Bson::Int64(a), Bson::Int64(b)) => a.cmp(b),
-            (Bson::Double(a), Bson::Double(b)) => a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
+            (Bson::Double(a), Bson::Double(b)) => {
+                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+            }
             (Bson::String(a), Bson::String(b)) => a.cmp(b),
             (Bson::Boolean(a), Bson::Boolean(b)) => a.cmp(b),
             (Bson::Null, Bson::Null) => std::cmp::Ordering::Equal,
@@ -151,10 +143,18 @@ fn cmp_bson_values(a: Option<&Bson>, b: Option<&Bson>) -> std::cmp::Ordering {
             (_, Bson::Null) => std::cmp::Ordering::Greater,
             (Bson::Int32(a), Bson::Int64(b)) => (*a as i64).cmp(b),
             (Bson::Int64(a), Bson::Int32(b)) => a.cmp(&(*b as i64)),
-            (Bson::Int32(a), Bson::Double(b)) => (*a as f64).partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
-            (Bson::Double(a), Bson::Int32(b)) => a.partial_cmp(&(*b as f64)).unwrap_or(std::cmp::Ordering::Equal),
-            (Bson::Int64(a), Bson::Double(b)) => (*a as f64).partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal),
-            (Bson::Double(a), Bson::Int64(b)) => a.partial_cmp(&(*b as f64)).unwrap_or(std::cmp::Ordering::Equal),
+            (Bson::Int32(a), Bson::Double(b)) => (*a as f64)
+                .partial_cmp(b)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            (Bson::Double(a), Bson::Int32(b)) => a
+                .partial_cmp(&(*b as f64))
+                .unwrap_or(std::cmp::Ordering::Equal),
+            (Bson::Int64(a), Bson::Double(b)) => (*a as f64)
+                .partial_cmp(b)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            (Bson::Double(a), Bson::Int64(b)) => a
+                .partial_cmp(&(*b as f64))
+                .unwrap_or(std::cmp::Ordering::Equal),
             _ => std::cmp::Ordering::Equal,
         },
         (Some(_), None) => std::cmp::Ordering::Greater,
@@ -169,7 +169,8 @@ mod tests {
 
     #[test]
     fn test_projection_include() {
-        let doc = bson::doc! { "_id": "123", "name": "Alice", "age": 30, "email": "alice@example.com" };
+        let doc =
+            bson::doc! { "_id": "123", "name": "Alice", "age": 30, "email": "alice@example.com" };
         let projection = bson::doc! { "name": 1, "age": 1 };
         let result = Projection::apply(&doc, &projection).unwrap();
         assert_eq!(result.get_str("name").unwrap(), "Alice");
@@ -180,7 +181,8 @@ mod tests {
 
     #[test]
     fn test_projection_exclude() {
-        let doc = bson::doc! { "_id": "123", "name": "Alice", "age": 30, "email": "alice@example.com" };
+        let doc =
+            bson::doc! { "_id": "123", "name": "Alice", "age": 30, "email": "alice@example.com" };
         let projection = bson::doc! { "email": 0 };
         let result = Projection::apply(&doc, &projection).unwrap();
         assert_eq!(result.get_str("name").unwrap(), "Alice");

@@ -10,9 +10,9 @@ impl QueryMatcher {
             if key.starts_with('$') {
                 match key.as_str() {
                     "$and" => {
-                        let arr = value.as_array().ok_or_else(|| {
-                            Error::InvalidQuery("$and requires array".into())
-                        })?;
+                        let arr = value
+                            .as_array()
+                            .ok_or_else(|| Error::InvalidQuery("$and requires array".into()))?;
                         for sub_filter in arr {
                             let sub_doc = sub_filter.as_document().ok_or_else(|| {
                                 Error::InvalidQuery("$and elements must be documents".into())
@@ -23,9 +23,9 @@ impl QueryMatcher {
                         }
                     }
                     "$or" => {
-                        let arr = value.as_array().ok_or_else(|| {
-                            Error::InvalidQuery("$or requires array".into())
-                        })?;
+                        let arr = value
+                            .as_array()
+                            .ok_or_else(|| Error::InvalidQuery("$or requires array".into()))?;
                         let mut any_match = false;
                         for sub_filter in arr {
                             let sub_doc = sub_filter.as_document().ok_or_else(|| {
@@ -41,9 +41,9 @@ impl QueryMatcher {
                         }
                     }
                     "$nor" => {
-                        let arr = value.as_array().ok_or_else(|| {
-                            Error::InvalidQuery("$nor requires array".into())
-                        })?;
+                        let arr = value
+                            .as_array()
+                            .ok_or_else(|| Error::InvalidQuery("$nor requires array".into()))?;
                         for sub_filter in arr {
                             let sub_doc = sub_filter.as_document().ok_or_else(|| {
                                 Error::InvalidQuery("$nor elements must be documents".into())
@@ -54,9 +54,9 @@ impl QueryMatcher {
                         }
                     }
                     "$not" => {
-                        let sub_doc = value.as_document().ok_or_else(|| {
-                            Error::InvalidQuery("$not requires document".into())
-                        })?;
+                        let sub_doc = value
+                            .as_document()
+                            .ok_or_else(|| Error::InvalidQuery("$not requires document".into()))?;
                         if Self::matches(doc, sub_doc)? {
                             return Ok(false);
                         }
@@ -109,9 +109,9 @@ impl QueryMatcher {
                         }
                     }
                     "$in" => {
-                        let arr = op_value.as_array().ok_or_else(|| {
-                            Error::InvalidQuery("$in requires array".into())
-                        })?;
+                        let arr = op_value
+                            .as_array()
+                            .ok_or_else(|| Error::InvalidQuery("$in requires array".into()))?;
                         if let Some(doc_val) = doc_value {
                             if !arr.iter().any(|v| Self::values_equal(Some(doc_val), v)) {
                                 return Ok(false);
@@ -121,9 +121,9 @@ impl QueryMatcher {
                         }
                     }
                     "$nin" => {
-                        let arr = op_value.as_array().ok_or_else(|| {
-                            Error::InvalidQuery("$nin requires array".into())
-                        })?;
+                        let arr = op_value
+                            .as_array()
+                            .ok_or_else(|| Error::InvalidQuery("$nin requires array".into()))?;
                         if let Some(doc_val) = doc_value {
                             if arr.iter().any(|v| Self::values_equal(Some(doc_val), v)) {
                                 return Ok(false);
@@ -140,9 +140,9 @@ impl QueryMatcher {
                         }
                     }
                     "$type" => {
-                        let type_str = op_value.as_str().ok_or_else(|| {
-                            Error::InvalidQuery("$type requires string".into())
-                        })?;
+                        let type_str = op_value
+                            .as_str()
+                            .ok_or_else(|| Error::InvalidQuery("$type requires string".into()))?;
                         if let Some(doc_val) = doc_value {
                             if Self::bson_type_name(doc_val) != type_str {
                                 return Ok(false);
@@ -152,9 +152,9 @@ impl QueryMatcher {
                         }
                     }
                     "$regex" => {
-                        let pattern = op_value.as_str().ok_or_else(|| {
-                            Error::InvalidQuery("$regex requires string".into())
-                        })?;
+                        let pattern = op_value
+                            .as_str()
+                            .ok_or_else(|| Error::InvalidQuery("$regex requires string".into()))?;
                         if let Some(doc_val) = doc_value {
                             if let Some(s) = doc_val.as_str() {
                                 let re = regex::Regex::new(pattern).map_err(|e| {
@@ -171,13 +171,16 @@ impl QueryMatcher {
                         }
                     }
                     "$all" => {
-                        let arr = op_value.as_array().ok_or_else(|| {
-                            Error::InvalidQuery("$all requires array".into())
-                        })?;
+                        let arr = op_value
+                            .as_array()
+                            .ok_or_else(|| Error::InvalidQuery("$all requires array".into()))?;
                         if let Some(doc_val) = doc_value {
                             if let Some(doc_arr) = doc_val.as_array() {
                                 for expected in arr {
-                                    if !doc_arr.iter().any(|v| Self::values_equal(Some(v), expected)) {
+                                    if !doc_arr
+                                        .iter()
+                                        .any(|v| Self::values_equal(Some(v), expected))
+                                    {
                                         return Ok(false);
                                     }
                                 }
@@ -233,9 +236,9 @@ impl QueryMatcher {
                         }
                     }
                     "$not" => {
-                        let inner = op_value.as_document().ok_or_else(|| {
-                            Error::InvalidQuery("$not requires document".into())
-                        })?;
+                        let inner = op_value
+                            .as_document()
+                            .ok_or_else(|| Error::InvalidQuery("$not requires document".into()))?;
                         if Self::match_field(doc, key, &Bson::Document(inner.clone()))? {
                             return Ok(false);
                         }
@@ -278,17 +281,21 @@ impl QueryMatcher {
             (Bson::Int32(a), Bson::Int64(b)) => (*a as i64).cmp(b) as i32,
             (Bson::Int64(a), Bson::Int32(b)) => a.cmp(&(*b as i64)) as i32,
             (Bson::Double(a), Bson::Int32(b)) => {
-                a.partial_cmp(&(*b as f64)).unwrap_or(std::cmp::Ordering::Equal) as i32
+                a.partial_cmp(&(*b as f64))
+                    .unwrap_or(std::cmp::Ordering::Equal) as i32
             }
-            (Bson::Int32(a), Bson::Double(b)) => {
-                (*a as f64).partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal) as i32
-            }
+            (Bson::Int32(a), Bson::Double(b)) => (*a as f64)
+                .partial_cmp(b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                as i32,
             (Bson::Double(a), Bson::Int64(b)) => {
-                a.partial_cmp(&(*b as f64)).unwrap_or(std::cmp::Ordering::Equal) as i32
+                a.partial_cmp(&(*b as f64))
+                    .unwrap_or(std::cmp::Ordering::Equal) as i32
             }
-            (Bson::Int64(a), Bson::Double(b)) => {
-                (*a as f64).partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal) as i32
-            }
+            (Bson::Int64(a), Bson::Double(b)) => (*a as f64)
+                .partial_cmp(b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                as i32,
             (Bson::ObjectId(a), Bson::ObjectId(b)) => a.bytes().cmp(&b.bytes()) as i32,
             (Bson::Boolean(a), Bson::Boolean(b)) => a.cmp(b) as i32,
             (Bson::Null, Bson::Null) => 0,
@@ -358,63 +365,94 @@ mod tests {
             &bson::doc! { "status": { "$in": ["active", "pending"] } }
         )
         .unwrap());
-        assert!(!QueryMatcher::matches(&doc, &bson::doc! { "status": { "$in": ["inactive"] } }).unwrap());
+        assert!(
+            !QueryMatcher::matches(&doc, &bson::doc! { "status": { "$in": ["inactive"] } })
+                .unwrap()
+        );
     }
 
     #[test]
     fn test_nin() {
         let doc = bson::doc! { "status": "active" };
-        assert!(QueryMatcher::matches(&doc, &bson::doc! { "status": { "$nin": ["inactive"] } }).unwrap());
-        assert!(!QueryMatcher::matches(&doc, &bson::doc! { "status": { "$nin": ["active"] } }).unwrap());
+        assert!(
+            QueryMatcher::matches(&doc, &bson::doc! { "status": { "$nin": ["inactive"] } })
+                .unwrap()
+        );
+        assert!(
+            !QueryMatcher::matches(&doc, &bson::doc! { "status": { "$nin": ["active"] } }).unwrap()
+        );
     }
 
     #[test]
     fn test_and() {
         let doc = bson::doc! { "name": "Alice", "age": 30 };
-        assert!(QueryMatcher::matches(&doc, &bson::doc! { "$and": [
-            { "name": "Alice" },
-            { "age": { "$gte": 25 } }
-        ] }).unwrap());
-        assert!(!QueryMatcher::matches(&doc, &bson::doc! { "$and": [
-            { "name": "Alice" },
-            { "age": { "$gte": 35 } }
-        ] }).unwrap());
+        assert!(QueryMatcher::matches(
+            &doc,
+            &bson::doc! { "$and": [
+                { "name": "Alice" },
+                { "age": { "$gte": 25 } }
+            ] }
+        )
+        .unwrap());
+        assert!(!QueryMatcher::matches(
+            &doc,
+            &bson::doc! { "$and": [
+                { "name": "Alice" },
+                { "age": { "$gte": 35 } }
+            ] }
+        )
+        .unwrap());
     }
 
     #[test]
     fn test_or() {
         let doc = bson::doc! { "name": "Alice" };
-        assert!(QueryMatcher::matches(&doc, &bson::doc! { "$or": [
-            { "name": "Alice" },
-            { "name": "Bob" }
-        ] }).unwrap());
-        assert!(!QueryMatcher::matches(&doc, &bson::doc! { "$or": [
-            { "name": "Charlie" },
-            { "name": "Bob" }
-        ] }).unwrap());
+        assert!(QueryMatcher::matches(
+            &doc,
+            &bson::doc! { "$or": [
+                { "name": "Alice" },
+                { "name": "Bob" }
+            ] }
+        )
+        .unwrap());
+        assert!(!QueryMatcher::matches(
+            &doc,
+            &bson::doc! { "$or": [
+                { "name": "Charlie" },
+                { "name": "Bob" }
+            ] }
+        )
+        .unwrap());
     }
 
     #[test]
     fn test_nor() {
         let doc = bson::doc! { "name": "Alice" };
-        assert!(QueryMatcher::matches(&doc, &bson::doc! { "$nor": [
-            { "name": "Bob" },
-            { "name": "Charlie" }
-        ] }).unwrap());
-        assert!(!QueryMatcher::matches(&doc, &bson::doc! { "$nor": [
-            { "name": "Alice" },
-            { "name": "Bob" }
-        ] }).unwrap());
+        assert!(QueryMatcher::matches(
+            &doc,
+            &bson::doc! { "$nor": [
+                { "name": "Bob" },
+                { "name": "Charlie" }
+            ] }
+        )
+        .unwrap());
+        assert!(!QueryMatcher::matches(
+            &doc,
+            &bson::doc! { "$nor": [
+                { "name": "Alice" },
+                { "name": "Bob" }
+            ] }
+        )
+        .unwrap());
     }
 
     #[test]
     fn test_not() {
         let doc = bson::doc! { "name": "Alice" };
-        assert!(QueryMatcher::matches(
-            &doc,
-            &bson::doc! { "name": { "$not": { "$eq": "Bob" } } }
-        )
-        .unwrap());
+        assert!(
+            QueryMatcher::matches(&doc, &bson::doc! { "name": { "$not": { "$eq": "Bob" } } })
+                .unwrap()
+        );
         assert!(!QueryMatcher::matches(
             &doc,
             &bson::doc! { "name": { "$not": { "$eq": "Alice" } } }
@@ -426,14 +464,20 @@ mod tests {
     fn test_exists() {
         let doc = bson::doc! { "name": "Alice" };
         assert!(QueryMatcher::matches(&doc, &bson::doc! { "name": { "$exists": true } }).unwrap());
-        assert!(QueryMatcher::matches(&doc, &bson::doc! { "email": { "$exists": false } }).unwrap());
-        assert!(!QueryMatcher::matches(&doc, &bson::doc! { "email": { "$exists": true } }).unwrap());
+        assert!(
+            QueryMatcher::matches(&doc, &bson::doc! { "email": { "$exists": false } }).unwrap()
+        );
+        assert!(
+            !QueryMatcher::matches(&doc, &bson::doc! { "email": { "$exists": true } }).unwrap()
+        );
     }
 
     #[test]
     fn test_type() {
         let doc = bson::doc! { "name": "Alice", "age": 30 };
-        assert!(QueryMatcher::matches(&doc, &bson::doc! { "name": { "$type": "string" } }).unwrap());
+        assert!(
+            QueryMatcher::matches(&doc, &bson::doc! { "name": { "$type": "string" } }).unwrap()
+        );
         assert!(QueryMatcher::matches(&doc, &bson::doc! { "age": { "$type": "int" } }).unwrap());
         assert!(!QueryMatcher::matches(&doc, &bson::doc! { "name": { "$type": "int" } }).unwrap());
     }
@@ -442,7 +486,9 @@ mod tests {
     fn test_regex() {
         let doc = bson::doc! { "name": "Alice" };
         assert!(QueryMatcher::matches(&doc, &bson::doc! { "name": { "$regex": "^Ali" } }).unwrap());
-        assert!(!QueryMatcher::matches(&doc, &bson::doc! { "name": { "$regex": "^Bob" } }).unwrap());
+        assert!(
+            !QueryMatcher::matches(&doc, &bson::doc! { "name": { "$regex": "^Bob" } }).unwrap()
+        );
     }
 
     #[test]

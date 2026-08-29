@@ -41,7 +41,11 @@ impl PagePool {
         }
         self.lru.push_back(page_id);
 
-        Ok(self.cache.get_mut(&page_id).map(|v| v.as_mut_slice()).unwrap())
+        Ok(self
+            .cache
+            .get_mut(&page_id)
+            .map(|v| v.as_mut_slice())
+            .unwrap())
     }
 
     pub fn flush(&mut self, file: &mut File) -> Result<()> {
@@ -56,8 +60,8 @@ impl PagePool {
     }
 
     pub fn put(&mut self, page_id: u32, data: Vec<u8>) {
-        if self.cache.contains_key(&page_id) {
-            self.cache.insert(page_id, data);
+        if let std::collections::hash_map::Entry::Occupied(mut e) = self.cache.entry(page_id) {
+            e.insert(data);
             if let Some(pos) = self.lru.iter().position(|&id| id == page_id) {
                 self.lru.remove(pos);
             }
@@ -204,7 +208,16 @@ mod tests {
         let mut pool = PagePool::new(10);
         pool.put(0, vec![0x42; 64]);
 
-        let page = pool.get(&File::create(&tempfile::TempDir::new().unwrap().path().join("dummy"), DEFAULT_PAGE_SIZE).unwrap(), 0).unwrap();
+        let page = pool
+            .get(
+                &File::create(
+                    &tempfile::TempDir::new().unwrap().path().join("dummy"),
+                    DEFAULT_PAGE_SIZE,
+                )
+                .unwrap(),
+                0,
+            )
+            .unwrap();
         assert_eq!(page[0], 0x42);
     }
 

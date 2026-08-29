@@ -133,12 +133,7 @@ impl<'a> BTree<'a> {
         }
     }
 
-    fn write_leaf_entry(
-        &mut self,
-        page_id: u32,
-        key: &[u8],
-        value: &[u8],
-    ) -> Result<()> {
+    fn write_leaf_entry(&mut self, page_id: u32, key: &[u8], value: &[u8]) -> Result<()> {
         let (num_keys, next_leaf, insert_pos) = {
             let page_data = self.allocator.file().page(page_id);
             let num_keys = read_u32_at(page_data, PageHeader::SIZE + 1) as usize;
@@ -191,11 +186,7 @@ impl<'a> BTree<'a> {
         Ok(())
     }
 
-    fn split_leaf_page(
-        &mut self,
-        page_id: u32,
-        split_point: usize,
-    ) -> Result<u32> {
+    fn split_leaf_page(&mut self, page_id: u32, split_point: usize) -> Result<u32> {
         let (mut entries, next_leaf) = {
             let page_data = self.allocator.file().page(page_id);
             let num_keys = read_u32_at(page_data, PageHeader::SIZE + 1) as usize;
@@ -218,7 +209,11 @@ impl<'a> BTree<'a> {
             write_bytes_at(new_page_data, cursor, v);
             cursor += 4 + v.len();
         }
-        write_u32_at(new_page_data, PageHeader::SIZE + 1, right_entries.len() as u32);
+        write_u32_at(
+            new_page_data,
+            PageHeader::SIZE + 1,
+            right_entries.len() as u32,
+        );
         write_u32_at(new_page_data, PageHeader::SIZE + 5, next_leaf);
         update_page_checksum(new_page_data);
 
@@ -273,12 +268,7 @@ impl<'a> BTree<'a> {
         }
     }
 
-    fn add_key_to_internal(
-        &mut self,
-        page_id: u32,
-        key: &[u8],
-        child: u32,
-    ) -> Result<()> {
+    fn add_key_to_internal(&mut self, page_id: u32, key: &[u8], child: u32) -> Result<()> {
         let (num_keys, insert_idx) = {
             let page_data = self.allocator.file().page(page_id);
             let num_keys = read_u32_at(page_data, PageHeader::SIZE + 1) as usize;
@@ -286,7 +276,7 @@ impl<'a> BTree<'a> {
             let mut cursor = PageHeader::SIZE + 5 + 4;
             for _ in 0..num_keys {
                 let k = read_bytes_at(page_data, cursor);
-                if key < &k[..] {
+                if key < k {
                     break;
                 }
                 insert_idx += 1;
@@ -332,11 +322,7 @@ impl<'a> BTree<'a> {
         Ok(())
     }
 
-    fn split_internal_page(
-        &mut self,
-        page_id: u32,
-        split_point: usize,
-    ) -> Result<(Vec<u8>, u32)> {
+    fn split_internal_page(&mut self, page_id: u32, split_point: usize) -> Result<(Vec<u8>, u32)> {
         let (keys, children) = {
             let page_data = self.allocator.file().page(page_id);
             let num_keys = read_u32_at(page_data, PageHeader::SIZE + 1) as usize;
@@ -585,7 +571,8 @@ fn init_leaf_page(file: &mut File, page_id: u32) {
     );
     page_data[PageHeader::SIZE] = 1;
     page_data[PageHeader::SIZE + 1..PageHeader::SIZE + 5].copy_from_slice(&0u32.to_le_bytes());
-    page_data[PageHeader::SIZE + 5..PageHeader::SIZE + 9].copy_from_slice(&END_OF_CHAIN.to_le_bytes());
+    page_data[PageHeader::SIZE + 5..PageHeader::SIZE + 9]
+        .copy_from_slice(&END_OF_CHAIN.to_le_bytes());
     page_data[PageHeader::SIZE + 9..].fill(0);
     update_page_checksum(page_data);
 }
@@ -627,7 +614,7 @@ fn find_child_for_key(page_data: &[u8], key: &[u8], num_keys: usize) -> u32 {
         cursor += 4 + k.len();
         let child = read_u32_at(page_data, cursor);
         cursor += 4;
-        if key < &k[..] {
+        if key < k {
             return last_child;
         }
         last_child = child;
@@ -639,7 +626,7 @@ fn find_insert_position(page_data: &[u8], key: &[u8], num_keys: usize) -> usize 
     let mut cursor = PageHeader::SIZE + 9;
     for pos in 0..num_keys {
         let k = read_bytes_at(page_data, cursor);
-        if key <= &k[..] {
+        if key <= k {
             return pos;
         }
         cursor += 4 + k.len() + 4;
@@ -765,7 +752,11 @@ mod tests {
     fn test_insert_causes_split() {
         let mut tree = create_test_tree(3);
         for i in 0..10u32 {
-            tree.insert(format!("key{:02}", i).as_bytes(), format!("val{:02}", i).as_bytes()).unwrap();
+            tree.insert(
+                format!("key{:02}", i).as_bytes(),
+                format!("val{:02}", i).as_bytes(),
+            )
+            .unwrap();
         }
         assert_eq!(tree.len().unwrap(), 10);
         for i in 0..10u32 {
@@ -792,7 +783,11 @@ mod tests {
     fn test_delete_causes_no_rebalance() {
         let mut tree = create_test_tree(3);
         for i in 0..10u32 {
-            tree.insert(format!("key{:02}", i).as_bytes(), format!("val{:02}", i).as_bytes()).unwrap();
+            tree.insert(
+                format!("key{:02}", i).as_bytes(),
+                format!("val{:02}", i).as_bytes(),
+            )
+            .unwrap();
         }
         for i in 0..5u32 {
             assert!(tree.delete(format!("key{:02}", i).as_bytes()).unwrap());
@@ -811,7 +806,8 @@ mod tests {
         let mut tree = create_test_tree(128);
         for i in 0..26u32 {
             let key = vec![b'a' + i as u8];
-            tree.insert(&key, &format!("val{}", i).into_bytes()).unwrap();
+            tree.insert(&key, &format!("val{}", i).into_bytes())
+                .unwrap();
         }
         let results = tree.range(b"c", b"g").unwrap();
         assert_eq!(results.len(), 4);
@@ -837,7 +833,8 @@ mod tests {
     fn test_stats() {
         let mut tree = create_test_tree(3);
         for i in 0..20u32 {
-            tree.insert(format!("key{:03}", i).as_bytes(), b"val").unwrap();
+            tree.insert(format!("key{:03}", i).as_bytes(), b"val")
+                .unwrap();
         }
         let stats = tree.stats().unwrap();
         assert!(stats.height >= 2);
@@ -850,7 +847,11 @@ mod tests {
     fn test_medium_insert() {
         let mut tree = create_test_tree(4);
         for i in 0..10u32 {
-            tree.insert(format!("k{:02}", i).as_bytes(), format!("v{:02}", i).as_bytes()).unwrap();
+            tree.insert(
+                format!("k{:02}", i).as_bytes(),
+                format!("v{:02}", i).as_bytes(),
+            )
+            .unwrap();
         }
         assert_eq!(tree.len().unwrap(), 10);
         for i in 0..10u32 {
@@ -913,7 +914,10 @@ mod tests {
         let file = Box::leak(Box::new(File::open(&path).unwrap()));
         let allocator = Box::leak(Box::new(Allocator::new(file)));
         let tree = BTree::open(allocator, root_page, BTreeConfig { order: 4 }).unwrap();
-        assert_eq!(tree.get(b"persist_key").unwrap(), Some(b"persist_value".to_vec()));
+        assert_eq!(
+            tree.get(b"persist_key").unwrap(),
+            Some(b"persist_value".to_vec())
+        );
         std::mem::forget(dir);
     }
 }

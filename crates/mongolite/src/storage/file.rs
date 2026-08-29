@@ -84,7 +84,8 @@ impl FileHeader {
         let total_pages = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
         offset += 4;
 
-        let page_count_at_checkpoint = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
+        let page_count_at_checkpoint =
+            u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
         offset += 4;
 
         let free_list_head = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
@@ -155,6 +156,14 @@ pub struct File {
     mmap: MmapMut,
     page_size: u32,
     dirty_pages: HashSet<u32>,
+}
+
+impl Drop for File {
+    fn drop(&mut self) {
+        // Flush dirty pages to disk before the mmap is dropped.
+        // This ensures all data is persisted before the OS unmaps the pages.
+        let _ = self.mmap.flush_async();
+    }
 }
 
 impl File {

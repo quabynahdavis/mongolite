@@ -56,10 +56,7 @@ impl ObjectId {
     }
 
     pub fn to_hex(&self) -> String {
-        self.0
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect()
+        self.0.iter().map(|b| format!("{:02x}", b)).collect()
     }
 
     pub fn from_hex(hex: &str) -> Result<Self, crate::error::Error> {

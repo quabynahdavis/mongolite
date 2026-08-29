@@ -46,7 +46,10 @@ impl<'a> Collection<'a> {
             Some(bson::Bson::ObjectId(id)) => ObjectId::from_bytes(id.bytes()),
             _ => {
                 let id = ObjectId::new();
-                doc.insert("_id", bson::Bson::ObjectId(bson::oid::ObjectId::from_bytes(*id.as_bytes())));
+                doc.insert(
+                    "_id",
+                    bson::Bson::ObjectId(bson::oid::ObjectId::from_bytes(*id.as_bytes())),
+                );
                 id
             }
         };
@@ -72,7 +75,7 @@ impl<'a> Collection<'a> {
 
     pub fn find(&self, filter: Option<Document>) -> Result<Vec<Document>> {
         let index = self.get_index()?;
-        let entries = Box::leak(Box::new(index)).iter()?;
+        let entries = index.iter()?;
         let mut docs = Vec::new();
         let filter = filter.unwrap_or_default();
         for (_, value) in entries {
@@ -181,11 +184,13 @@ impl<'a> Collection<'a> {
 
         unsafe {
             if let Some(root_page_bytes) = (*self.db.catalog).get(&name_key)? {
-                let root_page = u32::from_le_bytes(root_page_bytes.try_into().map_err(|_| {
-                    crate::error::Error::Corrupted("invalid root page".into())
-                })?);
-                let index = BTree::open(&mut *allocator, root_page, BTreeConfig { order: 4 });
-                return Ok(Box::leak(Box::new(index?)));
+                let root_page = u32::from_le_bytes(
+                    root_page_bytes
+                        .try_into()
+                        .map_err(|_| crate::error::Error::Corrupted("invalid root page".into()))?,
+                );
+                let index = BTree::open(&mut *allocator, root_page, BTreeConfig { order: 4 })?;
+                return Ok(Box::leak(Box::new(index)));
             }
 
             let index = BTree::new(&mut *allocator, BTreeConfig { order: 4 })?;
@@ -202,11 +207,14 @@ impl<'a> Collection<'a> {
         let allocator = self.db.allocator;
 
         unsafe {
-            let root_page_bytes = (*self.db.catalog).get(&name_key)?
+            let root_page_bytes = (*self.db.catalog)
+                .get(&name_key)?
                 .ok_or_else(|| crate::error::Error::CollectionNotFound(self.name.clone()))?;
-            let root_page = u32::from_le_bytes(root_page_bytes.try_into().map_err(|_| {
-                crate::error::Error::Corrupted("invalid root page".into())
-            })?);
+            let root_page = u32::from_le_bytes(
+                root_page_bytes
+                    .try_into()
+                    .map_err(|_| crate::error::Error::Corrupted("invalid root page".into()))?,
+            );
 
             BTree::open(&mut *allocator, root_page, BTreeConfig { order: 4 })
         }
@@ -215,7 +223,9 @@ impl<'a> Collection<'a> {
     fn filter_to_id(&self, filter: &Document) -> Result<Vec<u8>> {
         match filter.get("_id") {
             Some(bson::Bson::ObjectId(id)) => Ok(serialize_id(ObjectId::from_bytes(id.bytes()))),
-            _ => Err(crate::error::Error::InvalidQuery("filter must contain _id".into())),
+            _ => Err(crate::error::Error::InvalidQuery(
+                "filter must contain _id".into(),
+            )),
         }
     }
 }
@@ -238,7 +248,12 @@ fn apply_update(doc: &mut MongoDocument, update: &Document) -> Result<()> {
                         }
                     }
                 }
-                _ => return Err(crate::error::Error::InvalidUpdate(format!("unsupported operator: {}", key))),
+                _ => {
+                    return Err(crate::error::Error::InvalidUpdate(format!(
+                        "unsupported operator: {}",
+                        key
+                    )))
+                }
             }
         } else {
             doc.insert(key.clone(), value.clone());
@@ -265,7 +280,8 @@ mod tests {
         let (mut db, _dir) = create_test_db();
         let mut coll = db.collection("users");
 
-        coll.insert_one(doc! { "name": "Alice", "age": 30 }).unwrap();
+        coll.insert_one(doc! { "name": "Alice", "age": 30 })
+            .unwrap();
         coll.insert_one(doc! { "name": "Bob", "age": 25 }).unwrap();
 
         let docs = coll.find(None).unwrap();
@@ -297,13 +313,17 @@ mod tests {
         let (mut db, _dir) = create_test_db();
         let mut coll = db.collection("users");
 
-        let result = coll.insert_one(doc! { "name": "Alice", "age": 30 }).unwrap();
+        let result = coll
+            .insert_one(doc! { "name": "Alice", "age": 30 })
+            .unwrap();
         let id = result.inserted_id;
 
-        let update_result = coll.update_one(
-            doc! { "_id": bson::oid::ObjectId::from_bytes(*id.as_bytes()) },
-            doc! { "$set": { "age": 31 } },
-        ).unwrap();
+        let update_result = coll
+            .update_one(
+                doc! { "_id": bson::oid::ObjectId::from_bytes(*id.as_bytes()) },
+                doc! { "$set": { "age": 31 } },
+            )
+            .unwrap();
 
         assert_eq!(update_result.matched_count, 1);
         assert_eq!(update_result.modified_count, 1);
@@ -317,9 +337,9 @@ mod tests {
         let result = coll.insert_one(doc! { "name": "Alice" }).unwrap();
         let id = result.inserted_id;
 
-        let delete_result = coll.delete_one(
-            doc! { "_id": bson::oid::ObjectId::from_bytes(*id.as_bytes()) },
-        ).unwrap();
+        let delete_result = coll
+            .delete_one(doc! { "_id": bson::oid::ObjectId::from_bytes(*id.as_bytes()) })
+            .unwrap();
 
         assert_eq!(delete_result.deleted_count, 1);
         assert_eq!(coll.count(None).unwrap(), 0);

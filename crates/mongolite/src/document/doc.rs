@@ -70,8 +70,8 @@ impl Document {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, crate::error::Error> {
-        let inner = bson::from_slice(bytes)
-            .map_err(|e| crate::error::Error::Bson(e.to_string()))?;
+        let inner =
+            bson::from_slice(bytes).map_err(|e| crate::error::Error::Bson(e.to_string()))?;
         Ok(Self { inner })
     }
 

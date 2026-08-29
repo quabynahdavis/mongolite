@@ -36,9 +36,7 @@ impl<'a> Allocator<'a> {
         let entry_count = page_data.len() / 4;
         for i in 1..entry_count {
             let offset = i * 4;
-            let id = u32::from_le_bytes(
-                page_data[offset..offset + 4].try_into().unwrap()
-            );
+            let id = u32::from_le_bytes(page_data[offset..offset + 4].try_into().unwrap());
             if id != 0 {
                 let page_mut = self.file.page_mut(page_id);
                 page_mut[PageHeader::SIZE + offset..PageHeader::SIZE + offset + 4]

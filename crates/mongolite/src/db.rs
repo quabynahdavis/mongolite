@@ -6,7 +6,9 @@ use crate::storage::allocator::Allocator;
 use crate::storage::btree::{BTree, BTreeConfig};
 use crate::storage::file::{File, DEFAULT_PAGE_SIZE};
 
-pub use crate::collection::{Collection, DeleteResult, InsertManyResult, InsertOneResult, UpdateResult};
+pub use crate::collection::{
+    Collection, DeleteResult, InsertManyResult, InsertOneResult, UpdateResult,
+};
 pub use crate::cursor::Cursor;
 
 pub struct Database {
@@ -34,7 +36,11 @@ impl Database {
 
         let catalog = unsafe {
             if (*file_ptr).header().catalog_root_page != 0 {
-                BTree::open(&mut *alloc_ptr, (*file_ptr).header().catalog_root_page, BTreeConfig::default())
+                BTree::open(
+                    &mut *alloc_ptr,
+                    (*file_ptr).header().catalog_root_page,
+                    BTreeConfig::default(),
+                )
             } else {
                 BTree::new(&mut *alloc_ptr, BTreeConfig::default())
             }
