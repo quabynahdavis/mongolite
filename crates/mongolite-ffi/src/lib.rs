@@ -1,8 +1,9 @@
-use std::ffi::{CStr, c_char, c_int};
+use std::ffi::{c_char, c_int, CStr};
 use std::ptr;
 
 use mongolite::db::Database;
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[no_mangle]
 pub extern "C" fn mongolite_create(path: *const c_char) -> *mut Database {
     if path.is_null() {
@@ -21,6 +22,7 @@ pub extern "C" fn mongolite_create(path: *const c_char) -> *mut Database {
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongolite_open(path: *const c_char) -> *mut Database {
     if path.is_null() {
         return ptr::null_mut();
@@ -38,6 +40,7 @@ pub extern "C" fn mongolite_open(path: *const c_char) -> *mut Database {
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongolite_close(db: *mut Database) -> c_int {
     if db.is_null() {
         return -1;
@@ -50,6 +53,7 @@ pub extern "C" fn mongolite_close(db: *mut Database) -> c_int {
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongolite_insert(
     db: *mut Database,
     collection: *const c_char,
@@ -93,6 +97,7 @@ pub extern "C" fn mongolite_insert(
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongolite_find(
     db: *mut Database,
     collection: *const c_char,
@@ -144,10 +149,8 @@ pub extern "C" fn mongolite_find(
 }
 
 #[no_mangle]
-pub extern "C" fn mongolite_count(
-    db: *mut Database,
-    collection: *const c_char,
-) -> c_int {
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn mongolite_count(db: *mut Database, collection: *const c_char) -> c_int {
     unsafe {
         if db.is_null() || collection.is_null() {
             return -1;
@@ -167,6 +170,7 @@ pub extern "C" fn mongolite_count(
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn mongolite_delete(
     db: *mut Database,
     collection: *const c_char,
