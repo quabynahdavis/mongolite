@@ -17,7 +17,10 @@ impl PageType {
             0x02 => Ok(Self::BTreeInternal),
             0x03 => Ok(Self::Overflow),
             0x04 => Ok(Self::Catalog),
-            _ => Err(Error::Corrupted(format!("invalid page type: 0x{:02x}", value))),
+            _ => Err(Error::Corrupted(format!(
+                "invalid page type: 0x{:02x}",
+                value
+            ))),
         }
     }
 }

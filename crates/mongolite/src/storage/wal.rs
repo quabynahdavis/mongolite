@@ -132,10 +132,7 @@ impl Wal {
 
         let write_offset = Self::find_write_offset(&file);
 
-        Ok(Self {
-            file,
-            write_offset,
-        })
+        Ok(Self { file, write_offset })
     }
 
     pub fn append_page(&mut self, page_id: u32, data: &[u8]) -> Result<()> {
@@ -353,7 +350,9 @@ mod tests {
         wal.append_page(1, &[0xAB; 100]).unwrap();
         wal.clear().unwrap();
 
-        let pages_replayed = wal.replay(&mut File::create(&path, DEFAULT_PAGE_SIZE).unwrap()).unwrap();
+        let pages_replayed = wal
+            .replay(&mut File::create(&path, DEFAULT_PAGE_SIZE).unwrap())
+            .unwrap();
         assert_eq!(pages_replayed, 0);
     }
 
