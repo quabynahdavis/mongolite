@@ -28,6 +28,19 @@ impl Database {
         Self::from_file(file)
     }
 
+    pub fn open_or_create<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        match std::fs::metadata(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::create(path),
+            Err(e) => Err(Error::Io(e)),
+            Ok(meta) if meta.len() == 0 => {
+                let file = File::init_empty(path, DEFAULT_PAGE_SIZE)?;
+                Self::from_file(file)
+            }
+            Ok(_) => Self::open(path),
+        }
+    }
+
     fn from_file(file: File) -> Result<Self> {
         let file = Box::leak(Box::new(file));
         let file_ptr: *mut File = file;
@@ -132,6 +145,7 @@ pub(crate) fn deserialize_id(bytes: &[u8]) -> Result<ObjectId> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File as StdFile;
     use tempfile::TempDir;
 
     fn create_test_db() -> (Database, TempDir) {
@@ -161,5 +175,63 @@ mod tests {
         let (mut db, _dir) = create_test_db();
         let coll = db.collection("users");
         assert_eq!(coll.name(), "users");
+    }
+
+    #[test]
+    fn test_open_or_create_empty_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.mongolite");
+        StdFile::create(&path).unwrap();
+
+        let mut db = Database::open_or_create(&path).unwrap();
+        let mut coll = db.collection("users");
+        coll.insert_one(bson::doc! { "name": "Alice" }).unwrap();
+        let docs = coll.find(None).unwrap();
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs[0].get_str("name").unwrap(), "Alice");
+    }
+
+    #[test]
+    fn test_open_or_create_existing() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.mongolite");
+
+        {
+            let mut db = Database::create(&path).unwrap();
+            db.collection("users")
+                .insert_one(bson::doc! { "name": "Bob" })
+                .unwrap();
+            db.flush().unwrap();
+        }
+
+        {
+            let db = Database::open_or_create(&path).unwrap();
+            assert!(db.list_collections().unwrap().contains(&"users".to_string()));
+        }
+
+        {
+            let db = Database::open(&path).unwrap();
+            assert!(db.list_collections().unwrap().contains(&"users".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_open_or_create_missing() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.mongolite");
+
+        let db = Database::open_or_create(&path).unwrap();
+        assert!(db.list_collections().unwrap().is_empty());
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn test_open_or_create_corrupt() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("test.mongolite");
+        std::fs::write(&path, b"not a valid database header!!!!!!!!!!!!!!").unwrap();
+
+        let result = Database::open_or_create(&path);
+        assert!(matches!(result, Err(Error::Corrupted(_))));
     }
 }
