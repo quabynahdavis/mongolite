@@ -15,10 +15,7 @@ fn main() {
         _ => PathBuf::from(&args[1]),
     };
 
-    let db = match Database::create(&path) {
-        Ok(db) => db,
-        Err(_) => Database::open(&path).expect("Failed to open database"),
-    };
+    let db = Database::open_or_create(&path).expect("Failed to open database");
 
     println!("MongoLite CLI v0.1.0");
     println!("Connected to: {}", path.display());
