@@ -200,6 +200,36 @@ impl File {
         })
     }
 
+    pub fn init_empty(path: &Path, page_size: u32) -> Result<Self> {
+        if page_size < 512 || !page_size.is_power_of_two() {
+            return Err(Error::InvalidPageSize(page_size));
+        }
+
+        let file = OpenOptions::new().read(true).write(true).open(path)?;
+
+        if file.metadata()?.len() != 0 {
+            return Err(Error::Corrupted("file is not empty".into()));
+        }
+
+        file.set_len(page_size as u64)?;
+
+        let mut mmap = unsafe { MmapMut::map_mut(&file)? };
+
+        let mut header = FileHeader::new(page_size, 1);
+        header.checksum = header.compute_checksum();
+        let header_bytes = header.to_bytes();
+
+        mmap[..header_bytes.len()].copy_from_slice(&header_bytes);
+        mmap[header_bytes.len()..].fill(0);
+
+        Ok(Self {
+            file,
+            mmap,
+            page_size,
+            dirty_pages: HashSet::new(),
+        })
+    }
+
     pub fn open(path: &Path) -> Result<Self> {
         let file = OpenOptions::new().read(true).write(true).open(path)?;
 
