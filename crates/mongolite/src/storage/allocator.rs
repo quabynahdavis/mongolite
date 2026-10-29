@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::storage::file::File;
-use crate::storage::page::{Page, PageHeader, PageType};
+use crate::storage::page::{Page, PageMut, PageHeader, PageType};
 
 pub struct Allocator<'a> {
     file: &'a mut File,
@@ -30,6 +30,9 @@ impl<'a> Allocator<'a> {
 
         if next_free != 0 {
             self.free_list_head = next_free;
+            let header = self.file.header_mut();
+            header.free_list_head = self.free_list_head;
+            header.checksum = header.compute_checksum();
             return Ok(page_id);
         }
 
@@ -41,9 +44,21 @@ impl<'a> Allocator<'a> {
                 let page_mut = self.file.page_mut(page_id);
                 page_mut[PageHeader::SIZE + offset..PageHeader::SIZE + offset + 4]
                     .copy_from_slice(&0u32.to_le_bytes());
+                self.free_list_head = id;
+                let header = self.file.header_mut();
+                header.free_list_head = self.free_list_head;
+                header.checksum = header.compute_checksum();
                 return Ok(id);
             }
         }
+
+        // Re-initialize the page header from Free to a valid type (BTreeLeaf)
+        // before returning it
+        let page_mut = self.file.page_mut(page_id);
+        let mut page_header = PageMut::new(page_mut)?;
+        page_header.set_type(PageType::BTreeLeaf);
+        page_header.compute_checksum();
+        page_header.write_header();
 
         Ok(page_id)
     }
