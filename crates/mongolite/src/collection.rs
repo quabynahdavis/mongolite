@@ -5,7 +5,7 @@ use crate::document::oid::ObjectId;
 use crate::document::Document as MongoDocument;
 use crate::error::Result;
 use crate::query::QueryMatcher;
-use crate::storage::btree::{BTree, BTreeConfig};
+use crate::storage::btree::{BTree, BTreeConfig, Key};
 
 pub struct Collection<'a> {
     pub(crate) name: String,
@@ -20,11 +20,13 @@ pub struct InsertManyResult {
     pub inserted_ids: Vec<ObjectId>,
 }
 
+#[derive(Debug)]
 pub struct UpdateResult {
     pub matched_count: u64,
     pub modified_count: u64,
 }
 
+#[derive(Debug)]
 pub struct DeleteResult {
     pub deleted_count: u64,
 }
@@ -151,7 +153,30 @@ impl<'a> Collection<'a> {
     }
 
     pub fn update_many(&mut self, filter: Document, update: Document) -> Result<UpdateResult> {
-        self.update_one(filter, update)
+        let mut index = self.get_or_create_index()?;
+        let entries = index.iter()?;
+        let mut matched_count = 0u64;
+        let mut modified_count = 0u64;
+        for (key, value) in entries {
+            let doc = MongoDocument::from_bytes(&value)?;
+            let bson_doc = doc.to_bson().clone();
+            if QueryMatcher::matches(&bson_doc, &filter)? {
+                matched_count += 1;
+                let mut doc = MongoDocument::from_bytes(&value)?;
+                let old_bytes = doc.to_bytes()?;
+                apply_update(&mut doc, &update)?;
+                let new_bytes = doc.to_bytes()?;
+                if new_bytes != old_bytes {
+                    modified_count += 1;
+                }
+                index.delete(&key)?;
+                index.insert(&key, &new_bytes)?;
+            }
+        }
+        Ok(UpdateResult {
+            matched_count,
+            modified_count,
+        })
     }
 
     pub fn delete_one(&mut self, filter: Document) -> Result<DeleteResult> {
@@ -166,7 +191,22 @@ impl<'a> Collection<'a> {
     }
 
     pub fn delete_many(&mut self, filter: Document) -> Result<DeleteResult> {
-        self.delete_one(filter)
+        let mut index = self.get_or_create_index()?;
+        let entries = index.iter()?;
+        let mut deleted_count = 0u64;
+        let mut keys_to_delete: Vec<Key> = Vec::new();
+        for (key, value) in entries {
+            let doc = MongoDocument::from_bytes(&value)?;
+            let bson_doc = doc.to_bson().clone();
+            if QueryMatcher::matches(&bson_doc, &filter)? {
+                keys_to_delete.push(key);
+            }
+        }
+        for key in &keys_to_delete {
+            index.delete(key)?;
+            deleted_count += 1;
+        }
+        Ok(DeleteResult { deleted_count })
     }
 
     pub fn count(&self, filter: Option<Document>) -> Result<u64> {
@@ -371,5 +411,55 @@ mod tests {
         let result = coll.insert_many(docs).unwrap();
         assert_eq!(result.inserted_ids.len(), 3);
         assert_eq!(coll.count(None).unwrap(), 3);
+    }
+
+    #[test]
+    fn test_update_many_by_non_id_field() {
+        let (mut db, _dir) = create_test_db();
+        let mut coll = db.collection("users");
+
+        coll.insert_one(doc! { "name": "Alice", "status": "active" })
+            .unwrap();
+        coll.insert_one(doc! { "name": "Bob", "status": "active" })
+            .unwrap();
+        coll.insert_one(doc! { "name": "Charlie", "status": "inactive" })
+            .unwrap();
+
+        let result = coll
+            .update_many(
+                doc! { "status": "active" },
+                doc! { "$set": { "status": "archived" } },
+            )
+            .unwrap();
+
+        assert_eq!(result.matched_count, 2);
+        assert_eq!(result.modified_count, 2);
+
+        let docs = coll.find(None).unwrap();
+        let active_count = docs
+            .iter()
+            .filter(|d| d.get_str("status").unwrap() == "active")
+            .count();
+        assert_eq!(active_count, 0);
+    }
+
+    #[test]
+    fn test_delete_many_by_non_id_field() {
+        let (mut db, _dir) = create_test_db();
+        let mut coll = db.collection("users");
+
+        coll.insert_one(doc! { "name": "Alice", "status": "active" })
+            .unwrap();
+        coll.insert_one(doc! { "name": "Bob", "status": "active" })
+            .unwrap();
+        coll.insert_one(doc! { "name": "Charlie", "status": "inactive" })
+            .unwrap();
+
+        let result = coll
+            .delete_many(doc! { "status": "active" })
+            .unwrap();
+
+        assert_eq!(result.deleted_count, 2);
+        assert_eq!(coll.count(None).unwrap(), 1);
     }
 }
